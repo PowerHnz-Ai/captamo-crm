@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <base href="/checklist/">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#09090b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ultra">
+  <title>Ultra Operacional</title>
+  <link rel="stylesheet" href="dist/tailwind.css">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="manifest" href="manifest.json">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=Montserrat:wght@900&display=swap" rel="stylesheet">
+</head>
+  <body class="bg-app-bg text-app-text font-sans antialiased">
+  <div class="mesh-bg" aria-hidden="true"></div>
+  <div class="app relative z-10 w-full min-h-screen p-4 md:p-8">
+    <header class="header glass-surface rounded-2xl p-4 md:p-6">
+      <div class="header-top mb-2 flex items-center justify-between gap-3">
+        <div class="header-brand flex flex-col items-start gap-0.5">
+          <span class="ultra-wordmark">Ultra</span>
+          <span class="text-xs font-medium text-app-muted">Operacional · Checklist</span>
+        </div>
+        <div class="header-actions flex flex-wrap items-center justify-center gap-2">
+          <a href="/hub" class="hub-link inline-flex h-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary px-3 text-sm font-semibold text-app-subtle transition-colors hover:border-app-accent hover:text-app-accent" id="hubLink" title="Trocar produto">Trocar produto</a>
+          <span class="user-email rounded-md bg-app-secondary px-2.5 py-1 text-xs font-medium text-app-subtle md:text-sm" id="userEmail"></span>
+          <div class="user-role-code" id="userRoleCodeWrap"></div>
+          <button class="icon-btn inline-flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-base transition-colors hover:border-app-accent hover:text-app-accent" id="teamBtn" aria-label="Equipe" style="display: none;"><i data-lucide="users"></i></button>
+          <button class="icon-btn inline-flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-base transition-colors hover:border-app-accent hover:text-app-accent" id="allTasksBtn" aria-label="Ver todas as tarefas" title="Ver todas as tarefas"><i data-lucide="list-checks"></i></button>
+          <button class="icon-btn inline-flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-base transition-colors hover:border-app-accent hover:text-app-accent" id="refreshTasksBtn" aria-label="Atualizar tarefas" title="Atualizar tarefas"><i data-lucide="refresh-cw"></i></button>
+          <button class="icon-btn inline-flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-base transition-colors hover:border-app-accent hover:text-app-accent" id="settingsBtn" aria-label="Configurações"><i data-lucide="settings"></i></button>
+          <button class="icon-btn inline-flex h-10 w-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-base transition-colors hover:border-app-accent hover:text-app-accent" id="installBtn" aria-label="Instalar app" style="display: none;"><i data-lucide="download"></i></button>
+          <button class="icon-btn logout-btn inline-flex h-10 items-center justify-center rounded-lg border border-red-500/50 bg-red-500/10 px-3 text-sm font-semibold text-red-300 transition-colors hover:bg-red-500/20" id="logoutBtn" aria-label="Sair" style="display: none;">Sair</button>
+        </div>
+      </div>
+      <p class="subtitle daily-message text-sm text-app-subtle md:text-base" id="dailyMessage" aria-live="polite"></p>
+      <div class="subtitle viewing-info mt-1 rounded-lg border border-app-border bg-app-secondary px-3 py-2 text-xs text-app-subtle md:text-sm" id="viewingInfo" style="display: none;"></div>
+    </header>
+
+    <div class="mobile-sections-nav mt-4 rounded-xl border border-app-border bg-app-card p-2" id="mobileSectionsNav" aria-label="Seções">
+      <button type="button" class="mobile-section-btn rounded-lg px-3 py-2 text-sm font-medium text-app-subtle transition-colors hover:text-app-text" data-section="ready">Pronta entrega</button>
+      <button type="button" class="mobile-section-btn active rounded-lg px-3 py-2 text-sm font-medium text-app-subtle transition-colors hover:text-app-text" data-section="agenda">Agenda</button>
+    </div>
+
+    <main class="main-content mt-4 grid gap-4 lg:grid-cols-[1fr_1fr_1.1fr]">
+      <section class="ready-tasks-section rounded-2xl border border-app-border bg-app-card p-4 shadow-app md:p-5" data-mobile-section="ready">
+        <div class="tasks-header mb-3 flex items-center justify-between gap-3">
+          <h3 class="text-base font-semibold md:text-lg">Tarefas pronta entrega</h3>
+          <div class="ready-actions">
+            <button class="add-task-btn ready-action-btn inline-flex h-10 items-center justify-center rounded-lg bg-app-accent px-3 text-sm font-semibold text-white transition-colors hover:bg-app-accentHover" id="addReadyTaskBtn">+ Nova tarefa</button>
+            <button class="ready-action-btn ready-clear-btn inline-flex h-10 items-center justify-center rounded-lg px-3 text-sm font-medium transition-colors" id="clearCompletedReadyBtn">Limpar concluídas</button>
+          </div>
+        </div>
+        <ul class="task-list space-y-2" id="readyTaskList"></ul>
+      </section>
+
+      <section class="calendar-section rounded-2xl border border-app-border bg-app-card p-4 shadow-app md:p-5" data-mobile-section="agenda">
+        <div class="calendar-header mb-3 flex items-center justify-between gap-2">
+          <button class="nav-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-lg transition-colors hover:border-app-accent hover:text-app-accent" id="prevMonth" aria-label="Mês anterior">‹</button>
+          <h2 id="currentMonth" class="text-base font-semibold md:text-lg"></h2>
+          <button class="nav-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-lg transition-colors hover:border-app-accent hover:text-app-accent" id="nextMonth" aria-label="Próximo mês">›</button>
+        </div>
+        <div class="calendar-grid rounded-xl border border-app-border bg-app-secondary/40 p-2" id="calendarGrid"></div>
+      </section>
+
+      <section class="tasks-section rounded-2xl border border-app-border bg-app-card p-4 shadow-app md:p-5" data-mobile-section="agenda">
+        <div class="tasks-header mb-3 flex items-center justify-between gap-3">
+          <h3 id="selectedDateTitle" class="text-base font-semibold md:text-lg">Tarefas de hoje</h3>
+          <button class="add-task-btn inline-flex h-10 items-center justify-center rounded-lg bg-app-accent px-3 text-sm font-semibold text-white transition-colors hover:bg-app-accentHover" id="addTaskBtn">+ Nova tarefa</button>
+        </div>
+        
+        <ul class="task-list space-y-2" id="taskList"></ul>
+      </section>
+    </main>
+
+    <!-- Modal tarefa -->
+    <div class="modal-overlay bg-black/60 backdrop-blur-sm" id="taskModal">
+      <div class="modal w-full max-w-xl rounded-2xl border border-app-border bg-app-card p-5 shadow-app md:p-6">
+        <div class="modal-header mb-4 flex items-center justify-between">
+          <h3 id="modalTitle" class="text-lg font-semibold">Nova tarefa</h3>
+          <button class="close-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-xl leading-none transition-colors hover:border-app-accent hover:text-app-accent" id="closeModal"><i data-lucide="x"></i></button>
+        </div>
+        <form id="taskForm" class="space-y-4">
+          <input type="hidden" id="taskId">
+          <div class="form-group space-y-1.5">
+            <label for="taskTitle" class="text-sm font-medium text-app-subtle">Título da tarefa</label>
+            <input class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors placeholder:text-app-muted focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" type="text" id="taskTitle" placeholder="Ex: Pagar contas" required>
+          </div>
+          <div class="form-group space-y-1.5" id="taskAssigneeGroup" style="display: none;">
+            <label for="taskAssignee" class="text-sm font-medium text-app-subtle">Atribuir para</label>
+            <select class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" id="taskAssignee">
+              <option value="">Selecione um colaborador</option>
+            </select>
+          </div>
+          <div class="form-group space-y-1.5">
+            <label for="taskFrequency" class="text-sm font-medium text-app-subtle">Frequência</label>
+            <select class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" id="taskFrequency">
+              <option value="daily">Diária</option>
+              <option value="weekly">Semanal</option>
+              <option value="biweekly">Quinzenal (a cada 2 semanas)</option>
+              <option value="monthly">Mensal</option>
+              <option value="specific">Data específica</option>
+            </select>
+          </div>
+          <div class="form-group space-y-1.5" id="datePickerGroup">
+            <label for="taskDate" class="text-sm font-medium text-app-subtle">Data</label>
+            <input class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" type="date" id="taskDate">
+          </div>
+          <div class="form-group space-y-2" id="weekDaysGroup" style="display: none;">
+            <label class="text-sm font-medium text-app-subtle">Dias da semana</label>
+            <div class="working-days-options grid grid-cols-4 gap-2 sm:grid-cols-7" id="taskWeekDaysOptions"></div>
+            <p class="text-xs text-app-muted">A tarefa aparecerá nos dias marcados.</p>
+          </div>
+          <div class="form-group space-y-1.5" id="weekDayGroup" style="display: none;">
+            <label for="taskWeekDay" class="text-sm font-medium text-app-subtle">Dia da semana</label>
+            <select class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" id="taskWeekDay">
+              <option value="0">Domingo</option>
+              <option value="1">Segunda</option>
+              <option value="2">Terça</option>
+              <option value="3">Quarta</option>
+              <option value="4">Quinta</option>
+              <option value="5">Sexta</option>
+              <option value="6">Sábado</option>
+            </select>
+          </div>
+          <div class="form-group space-y-2" id="monthDayGroup" style="display: none;">
+            <label for="taskMonthDay" class="text-sm font-medium text-app-subtle">Dia do mês</label>
+            <input class="h-11 w-full rounded-lg border border-app-border bg-app-secondary px-3 text-sm text-app-text outline-none transition-colors placeholder:text-app-muted focus:border-app-accent focus:ring-2 focus:ring-app-accent/30" type="number" id="taskMonthDay" min="1" max="31" placeholder="1-31">
+            <label class="month-last-day-option inline-flex items-center gap-2 text-sm text-app-subtle">
+              <input type="checkbox" id="taskLastDayOfMonth">
+              <span>Último dia do mês</span>
+            </label>
+          </div>
+          <div class="modal-actions mt-4 flex items-center justify-end gap-2">
+            <button type="button" class="btn-secondary inline-flex h-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary px-4 text-sm font-medium text-app-subtle transition-colors hover:text-app-text" id="cancelBtn">Cancelar</button>
+            <button type="submit" class="btn-primary inline-flex h-10 items-center justify-center rounded-lg bg-app-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-app-accentHover">Salvar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Modal configurações / opções estéticas -->
+    <div class="modal-overlay bg-black/60 backdrop-blur-sm" id="settingsModal">
+      <div class="modal w-full max-w-2xl rounded-2xl border border-app-border bg-app-card p-5 shadow-app md:p-6">
+        <div class="modal-header mb-4 flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Configurações</h3>
+          <button class="close-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-xl leading-none transition-colors hover:border-app-accent hover:text-app-accent" id="closeSettings"><i data-lucide="x"></i></button>
+        </div>
+        <div class="settings-content space-y-5">
+          <div class="settings-section rounded-xl border border-app-border bg-app-secondary/40 p-4">
+            <h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-app-subtle">Tema</h4>
+            <div class="theme-options grid gap-2 sm:grid-cols-3">
+              <label class="theme-option flex items-center gap-2 rounded-lg border border-app-border bg-app-secondary px-3 py-2 text-sm">
+                <input type="radio" name="theme" value="dark" checked>
+                <span class="theme-preview dark"></span>
+                Escuro
+              </label>
+              <label class="theme-option flex items-center gap-2 rounded-lg border border-app-border bg-app-secondary px-3 py-2 text-sm">
+                <input type="radio" name="theme" value="light">
+                <span class="theme-preview light"></span>
+                Claro
+              </label>
+              <label class="theme-option flex items-center gap-2 rounded-lg border border-app-border bg-app-secondary px-3 py-2 text-sm">
+                <input type="radio" name="theme" value="system">
+                <span class="theme-preview system"></span>
+                Sistema
+              </label>
+            </div>
+          </div>
+          <div class="settings-section rounded-xl border border-app-border bg-app-secondary/40 p-4">
+            <h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-app-subtle">Cor de destaque</h4>
+            <div class="accent-picker">
+              <button type="button" id="accentPickerBtn" class="accent-picker-btn" aria-label="Selecionar cor de destaque">
+                <span class="accent-picker-swatch" id="accentPickerSwatch"></span>
+                <span class="accent-picker-label">
+                  <span>Cor atual</span>
+                  <strong id="accentPickerValue">#22C55E</strong>
+                </span>
+                <span class="accent-picker-chevron">Selecionar</span>
+              </button>
+              <input type="color" id="accentColorInput" value="#22c55e" class="accent-color-input" aria-label="Escolher cor de destaque">
+              <p class="settings-hint mt-2 text-xs text-app-muted md:text-sm">Clique para abrir a paleta de cores (RGB/HEX) e escolher qualquer tom.</p>
+            </div>
+          </div>
+          <div class="settings-section rounded-xl border border-app-border bg-app-secondary/40 p-4">
+            <h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-app-subtle">Tamanho da fonte</h4>
+            <div class="size-options flex flex-wrap gap-2">
+              <button class="size-option" data-size="small">Pequeno</button>
+              <button class="size-option active" data-size="medium">Médio</button>
+              <button class="size-option" data-size="large">Grande</button>
+            </div>
+          </div>
+          <div class="settings-section rounded-xl border border-app-border bg-app-secondary/40 p-4">
+            <h4 class="mb-3 text-sm font-semibold uppercase tracking-wide text-app-subtle">Dias de funcionamento</h4>
+            <div class="working-days-options grid grid-cols-4 gap-2 sm:grid-cols-7">
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="1">
+                Seg
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="2">
+                Ter
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="3">
+                Qua
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="4">
+                Qui
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="5">
+                Sex
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="6">
+                Sáb
+              </label>
+              <label class="day-option inline-flex items-center justify-center gap-1 rounded-lg border border-app-border bg-app-secondary px-2 py-2 text-sm">
+                <input type="checkbox" class="working-day-input" value="0">
+                Dom
+              </label>
+            </div>
+            <p class="settings-hint mt-3 text-xs text-app-muted md:text-sm">
+              Usado para ajustar tarefas mensais para o dia útil anterior, caso caiam fora dos dias de funcionamento.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal: todas as tarefas -->
+    <div class="modal-overlay bg-black/60 backdrop-blur-sm" id="allTasksModal">
+      <div class="modal all-tasks-modal w-full max-w-2xl rounded-2xl border border-app-border bg-app-card p-5 shadow-app md:p-6">
+        <div class="modal-header mb-4 flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Todas as tarefas</h3>
+          <button class="close-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-xl leading-none transition-colors hover:border-app-accent hover:text-app-accent" id="closeAllTasks"><i data-lucide="x"></i></button>
+        </div>
+        <div class="all-tasks-content space-y-4">
+          <p class="text-xs text-app-subtle md:text-sm">Toque em uma tarefa recorrente para abrir o dia em que ela aparece.</p>
+          <div id="allTasksList" class="all-tasks-list max-h-[55vh] overflow-auto rounded-xl border border-app-border bg-app-secondary/30 p-2"></div>
+          <div class="modal-actions mt-2 flex items-center justify-end gap-2">
+            <button type="button" class="btn-secondary inline-flex h-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary px-4 text-sm font-medium text-app-subtle transition-colors hover:text-app-text" id="cancelAllTasksBtn">Fechar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal equipe / administração -->
+    <div class="modal-overlay bg-black/60 backdrop-blur-sm" id="teamModal">
+      <div class="modal w-full max-w-3xl rounded-2xl border border-app-border bg-app-card p-5 shadow-app md:p-6">
+        <div class="modal-header mb-4 flex items-center justify-between">
+          <h3 class="text-lg font-semibold">Equipe da empresa</h3>
+          <button class="close-btn inline-flex h-9 w-9 items-center justify-center rounded-lg border border-app-border bg-app-secondary text-xl leading-none transition-colors hover:border-app-accent hover:text-app-accent" id="closeTeam"><i data-lucide="x"></i></button>
+        </div>
+        <div class="team-content space-y-4">
+          <p class="team-hint rounded-lg border border-app-border bg-app-secondary/40 p-3 text-xs text-app-subtle md:text-sm">
+            Apenas administradores podem alterar cargos e excluir usuários da empresa. As alterações afetam o acesso imediatamente.
+          </p>
+          <div id="teamList" class="team-list max-h-[50vh] overflow-auto rounded-xl border border-app-border bg-app-secondary/30 p-2"></div>
+          <div class="modal-actions mt-2 flex items-center justify-end gap-2">
+            <button type="button" class="btn-secondary inline-flex h-10 items-center justify-center rounded-lg border border-app-border bg-app-secondary px-4 text-sm font-medium text-app-subtle transition-colors hover:text-app-text" id="cancelTeamBtn">Fechar</button>
+            <button type="button" class="btn-primary inline-flex h-10 items-center justify-center rounded-lg bg-app-accent px-4 text-sm font-semibold text-white transition-colors hover:bg-app-accentHover" id="saveTeamBtn">Salvar alterações</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="config.js"></script>
+  <script src="firebase-init.js"></script>
+  <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>

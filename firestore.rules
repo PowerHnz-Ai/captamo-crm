@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// Regras compartilhadas entre Task Checklist e Mister HUB CRM.
+// Fonte de verdade: task-checklist/firestore.rules
+// Faça deploy com: firebase deploy --only firestore:rules
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

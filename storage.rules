@@ -1,0 +1,10 @@
+rules_version = '2';
+
+// Fonte de deploy: task-checklist/storage.rules
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /companies/{companyId}/{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

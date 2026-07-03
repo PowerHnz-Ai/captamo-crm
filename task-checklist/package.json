@@ -1,0 +1,19 @@
+{
+  "name": "meu-checklist",
+  "version": "1.0.0",
+  "description": "Checklist de tarefas diárias, semanais, quinzenais e mensais",
+  "scripts": {
+    "start": "npx serve . -p 3000",
+    "icons": "echo 'Abra generate-icons.html no navegador e salve os arquivos em icons/'",
+    "build:css": "tailwindcss -i ./tailwind.input.css -o ./dist/tailwind.css --minify",
+    "watch:css": "tailwindcss -i ./tailwind.input.css -o ./dist/tailwind.css --watch",
+    "firebase:login": "npx firebase-tools login",
+    "firebase:deploy:rules": "npx firebase-tools deploy --only firestore:rules"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.21",
+    "firebase-tools": "^15.22.1",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17"
+  }
+}

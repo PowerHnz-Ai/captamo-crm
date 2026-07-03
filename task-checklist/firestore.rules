@@ -1,0 +1,201 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Perfil do usuário autenticado (só chamar após garantir que existe).
+    function myProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function myProfileExists() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function iAmAdmin() {
+      return myProfileExists() && myProfile().role == 'admin';
+    }
+
+    function iAmGerente() {
+      return myProfileExists() && myProfile().role == 'gerente';
+    }
+
+    function iAmLeader() {
+      return myProfileExists() && myProfile().role == 'leader';
+    }
+
+    function isCompanyManagerFor(userId) {
+      return (iAmAdmin() || iAmGerente()) && sameCompanyAs(userId);
+    }
+
+    function canReadUserTasks(userId) {
+      return isSelf(userId)
+        || isCompanyAdminFor(userId)
+        || (iAmGerente() && sameCompanyAs(userId))
+        || (iAmLeader() && sameCompanyAs(userId));
+    }
+
+    // O usuário-alvo existe e pertence à mesma empresa do solicitante.
+    function sameCompanyAs(userId) {
+      return myProfileExists()
+        && exists(/databases/$(database)/documents/users/$(userId))
+        && get(/databases/$(database)/documents/users/$(userId)).data.companyId == myProfile().companyId;
+    }
+
+    function isCompanyAdminFor(userId) {
+      return iAmAdmin() && sameCompanyAs(userId);
+    }
+
+    // ----- Empresas -----
+    match /companies/{companyId} {
+      // Leitura por ID (necessário no cadastro por código e ao carregar a empresa).
+      // Listagem é proibida: sem o código (ID) não é possível enumerar empresas.
+      allow get: if isSignedIn();
+      allow list: if false;
+
+      // Criação: o próprio usuário registra a empresa que está criando.
+      allow create: if isSignedIn()
+        && request.resource.data.createdBy == request.auth.uid;
+
+      // Atualização: apenas admin da própria empresa, sem trocar o dono.
+      allow update: if iAmAdmin()
+        && myProfile().companyId == companyId
+        && request.resource.data.createdBy == resource.data.createdBy;
+
+      allow delete: if false;
+    }
+
+    // ----- Perfis de usuário -----
+    match /users/{userId} {
+      // Leitura: o próprio usuário, ou um admin da MESMA empresa.
+      // O uso de resource.data.companyId força a consulta de listagem a filtrar
+      // pela empresa do admin (não permite listar usuários de outras empresas).
+      allow get: if isSelf(userId)
+        || ((iAmAdmin() || iAmGerente() || iAmLeader()) && resource.data.companyId == myProfile().companyId);
+      allow list: if (iAmAdmin() || iAmGerente() || iAmLeader())
+        && resource.data.companyId == myProfile().companyId;
+
+      // Criação do próprio perfil no cadastro:
+      // - membro entra em uma empresa existente com cargo 'member';
+      // - admin só pode marcar 'admin' se for o criador da empresa informada.
+      allow create: if isSelf(userId)
+        && request.resource.data.companyId is string
+        && exists(/databases/$(database)/documents/companies/$(request.resource.data.companyId))
+        && (
+          request.resource.data.role == 'member'
+          || (
+            request.resource.data.role == 'admin'
+            && get(/databases/$(database)/documents/companies/$(request.resource.data.companyId)).data.createdBy == request.auth.uid
+          )
+        );
+
+      // Atualização:
+      // - o próprio usuário pode editar seu doc SEM alterar cargo nem empresa;
+      // - admin da mesma empresa pode alterar cargos e remover da empresa.
+      allow update: if (
+          isSelf(userId)
+          && request.resource.data.role == resource.data.role
+          && request.resource.data.companyId == resource.data.companyId
+        )
+        || isCompanyAdminFor(userId);
+
+      // O app remove usuários da empresa via update (não deleta o doc).
+      allow delete: if false;
+
+      // ----- Tarefas do usuário -----
+      // O próprio usuário ou um admin da mesma empresa podem ler/escrever.
+      match /tasks/{document=**} {
+        allow read: if canReadUserTasks(userId);
+        allow write: if isSelf(userId) || isCompanyAdminFor(userId) || (iAmGerente() && sameCompanyAs(userId));
+      }
+    }
+
+    // ----- Mister HUB CRM (mesmo projeto Firebase) -----
+    // Escrita via Admin SDK no backend Next.js. Cliente só pode ler dados da própria empresa.
+
+    match /contacts/{contactId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /conversations/{conversationId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if myProfileExists()
+          && get(/databases/$(database)/documents/conversations/$(conversationId)).data.companyId == myProfile().companyId;
+        allow write: if false;
+      }
+    }
+
+    match /templates/{templateId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /campaigns/{campaignId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+
+      match /jobs/{jobId} {
+        allow read: if myProfileExists()
+          && get(/databases/$(database)/documents/campaigns/$(campaignId)).data.companyId == myProfile().companyId;
+        allow write: if false;
+      }
+    }
+
+    match /integration_events/{eventId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /contact_lists/{listId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /contact_origins/{originId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /stats_daily/{statId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /pipeline_stages/{stageId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /deals/{dealId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+
+    match /funnel_events/{eventId} {
+      allow read: if myProfileExists()
+        && resource.data.companyId == myProfile().companyId;
+      allow write: if false;
+    }
+  }
+}
