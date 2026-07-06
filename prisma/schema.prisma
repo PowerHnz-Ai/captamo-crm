@@ -1,0 +1,433 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// Convenções:
+// - IDs string (cuid) para manter o formato que rotas e componentes já esperam.
+// - Datas em DATETIME(3); a camada de repositório expõe epoch millis (number).
+// - Campos de status como String (valores vêm de provedores externos e podem variar).
+// - Estruturas dinâmicas (payloads, configs, tags) em colunas Json.
+
+model CompanySettings {
+  companyId          String  @id @map("company_id") @db.VarChar(64)
+  // Config WhatsApp (antes embutida no doc companies.whatsapp do Firestore)
+  provider           String? @db.VarChar(32)
+  phoneNumberId      String? @map("phone_number_id") @db.VarChar(64)
+  wabaId             String? @map("waba_id") @db.VarChar(64)
+  instanceId         String? @map("instance_id") @db.VarChar(128)
+  apiKeyRef          String? @map("api_key_ref") @db.VarChar(128)
+  /// Token da API criptografado (AES-256-GCM via lib/crypto.ts) — por empresa.
+  apiKeySecret       String?   @map("api_key_secret") @db.Text
+  apiKeyLast4        String?   @map("api_key_last4") @db.VarChar(8)
+  configuredAt       DateTime? @map("configured_at") @db.DateTime(3)
+  configuredBy       String?   @map("configured_by") @db.VarChar(64)
+  webhookVerifyToken String? @map("webhook_verify_token") @db.VarChar(128)
+  messagingLimitTier Int?    @map("messaging_limit_tier")
+  dailyCap           Int?    @map("daily_cap")
+  baseUrl            String? @map("base_url") @db.VarChar(255)
+  // AssignmentSettings (antes companies.assignmentSettings)
+  assignmentSettings Json?   @map("assignment_settings")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([phoneNumberId])
+  @@index([instanceId])
+  @@map("company_settings")
+}
+
+model Connection {
+  id                 String   @id @default(cuid()) @db.VarChar(32)
+  companyId          String   @map("company_id") @db.VarChar(64)
+  label              String   @db.VarChar(120)
+  provider           String   @db.VarChar(32)
+  status             String   @default("disconnected") @db.VarChar(24)
+  instanceId         String?  @map("instance_id") @db.VarChar(128)
+  phoneNumber        String?  @map("phone_number") @db.VarChar(32)
+  baseUrl            String?  @map("base_url") @db.VarChar(255)
+  apiKeyRef          String?  @map("api_key_ref") @db.VarChar(128)
+  /// Token da API criptografado — tem precedência sobre apiKeyRef/company_settings.
+  apiKeySecret       String?  @map("api_key_secret") @db.Text
+  phoneNumberId      String?  @map("phone_number_id") @db.VarChar(64)
+  wabaId             String?  @map("waba_id") @db.VarChar(64)
+  messagingLimitTier Int?     @map("messaging_limit_tier")
+  dailyCap           Int?     @map("daily_cap")
+  isDefault          Boolean  @default(false) @map("is_default")
+  createdAt          DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId])
+  @@index([phoneNumberId])
+  @@index([instanceId])
+  @@map("connections")
+}
+
+model Contact {
+  id              String   @id @default(cuid()) @db.VarChar(32)
+  companyId       String   @map("company_id") @db.VarChar(64)
+  name            String   @db.VarChar(160)
+  phone           String   @db.VarChar(32)
+  /// Telefone normalizado (só dígitos, com DDI) — busca indexada por telefone.
+  phoneNormalized String   @map("phone_normalized") @db.VarChar(32)
+  source          String   @default("") @db.VarChar(80)
+  tags            Json?
+  optIn           Boolean  @default(true) @map("opt_in")
+  blocked         Boolean  @default(false)
+  archived        Boolean  @default(false)
+  notes           String?  @db.Text
+  customFields    Json?    @map("custom_fields")
+  originId        String?  @map("origin_id") @db.VarChar(32)
+  originFields    Json?    @map("origin_fields")
+  leadClass       Int?     @map("lead_class")
+  createdAt       DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([companyId, phoneNormalized])
+  @@index([companyId, createdAt])
+  @@index([companyId, leadClass])
+  @@map("contacts")
+}
+
+model ContactList {
+  id          String   @id @default(cuid()) @db.VarChar(32)
+  companyId   String   @map("company_id") @db.VarChar(64)
+  name        String   @db.VarChar(160)
+  description String?  @db.VarChar(500)
+  tagFilter   Json?    @map("tag_filter")
+  contactIds  Json?    @map("contact_ids")
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId])
+  @@map("contact_lists")
+}
+
+model Conversation {
+  id                 String    @id @default(cuid()) @db.VarChar(32)
+  companyId          String    @map("company_id") @db.VarChar(64)
+  contactId          String    @map("contact_id") @db.VarChar(32)
+  phone              String    @db.VarChar(32)
+  phoneNormalized    String    @map("phone_normalized") @db.VarChar(32)
+  status             String    @default("open") @db.VarChar(16)
+  lastMessageAt      DateTime  @map("last_message_at") @db.DateTime(3)
+  lastInboundAt      DateTime? @map("last_inbound_at") @db.DateTime(3)
+  lastMessagePreview String?   @map("last_message_preview") @db.VarChar(500)
+  unreadCount        Int       @default(0) @map("unread_count")
+  assignedTo         String?   @map("assigned_to") @db.VarChar(64)
+  assignedAt         DateTime? @map("assigned_at") @db.DateTime(3)
+  firstResponseAt    DateTime? @map("first_response_at") @db.DateTime(3)
+  connectionId       String?   @map("connection_id") @db.VarChar(32)
+  /// Etiquetas próprias da conversa (ex.: "orçamento", "urgente").
+  labels             Json?
+  createdAt          DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  messages Message[]
+
+  @@index([companyId, lastMessageAt(sort: Desc)])
+  @@index([companyId, status])
+  @@index([companyId, assignedTo])
+  @@index([companyId, phoneNormalized])
+  @@index([contactId])
+  @@map("conversations")
+}
+
+model Message {
+  id                   String    @id @default(cuid()) @db.VarChar(32)
+  conversationId       String    @map("conversation_id") @db.VarChar(32)
+  contactId            String    @map("contact_id") @db.VarChar(32)
+  companyId            String?   @map("company_id") @db.VarChar(64)
+  whatsappMessageId    String?   @map("whatsapp_message_id") @db.VarChar(128)
+  direction            String    @db.VarChar(16)
+  type                 String    @default("text") @db.VarChar(24)
+  body                 String    @db.Text
+  status               String    @default("received") @db.VarChar(24)
+  media                Json?
+  templateName         String?   @map("template_name") @db.VarChar(160)
+  templateParameters   Json?     @map("template_parameters")
+  templateRenderedBody String?   @map("template_rendered_body") @db.Text
+  templateFooter       String?   @map("template_footer") @db.VarChar(255)
+  templateButtons      Json?     @map("template_buttons")
+  replyTo              Json?     @map("reply_to")
+  reactions            Json?
+  interactivePayload   String?   @map("interactive_payload") @db.Text
+  rawPayload           Json?     @map("raw_payload")
+  statusError          String?   @map("status_error") @db.Text
+  connectionId         String?   @map("connection_id") @db.VarChar(32)
+  deletedAt            DateTime? @map("deleted_at") @db.DateTime(3)
+  sentByUid            String?   @map("sent_by_uid") @db.VarChar(64)
+  sentByName           String?   @map("sent_by_name") @db.VarChar(120)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([whatsappMessageId])
+  @@index([companyId, direction])
+  @@index([companyId, status])
+  @@map("messages")
+}
+
+model Template {
+  id                   String    @id @default(cuid()) @db.VarChar(64)
+  companyId            String?   @map("company_id") @db.VarChar(64)
+  name                 String    @db.VarChar(160)
+  language             String    @default("pt_BR") @db.VarChar(16)
+  category             String    @default("utility") @db.VarChar(32)
+  status               String    @default("draft") @db.VarChar(24)
+  body                 String    @db.Text
+  header               Json?
+  variableSamples      Json?     @map("variable_samples")
+  footer               String?   @db.VarChar(255)
+  buttons              Json?
+  provider             String?   @db.VarChar(32)
+  metaTemplateId       String?   @map("meta_template_id") @db.VarChar(64)
+  requiresMetaApproval Boolean?  @map("requires_meta_approval")
+  submittedAt          DateTime? @map("submitted_at") @db.DateTime(3)
+  approvedAt           DateTime? @map("approved_at") @db.DateTime(3)
+  rejectionReason      String?   @map("rejection_reason") @db.Text
+  createdAt            DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt            DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId, name])
+  @@map("templates")
+}
+
+model Campaign {
+  id                     String    @id @default(cuid()) @db.VarChar(32)
+  companyId              String    @map("company_id") @db.VarChar(64)
+  name                   String    @db.VarChar(160)
+  templateName           String    @map("template_name") @db.VarChar(160)
+  templateLanguage       String    @default("pt_BR") @map("template_language") @db.VarChar(16)
+  status                 String    @default("draft") @db.VarChar(16)
+  contactListId          String?   @map("contact_list_id") @db.VarChar(32)
+  audienceType           String?   @map("audience_type") @db.VarChar(24)
+  audienceConfig         Json?     @map("audience_config")
+  totalContacts          Int       @default(0) @map("total_contacts")
+  sentCount              Int       @default(0) @map("sent_count")
+  failedCount            Int       @default(0) @map("failed_count")
+  skippedCount           Int       @default(0) @map("skipped_count")
+  maxSendsPerRun         Int?      @map("max_sends_per_run")
+  parameterMapping       Json?     @map("parameter_mapping")
+  contactOriginId        String?   @map("contact_origin_id") @db.VarChar(32)
+  contactOriginKey       String?   @map("contact_origin_key") @db.VarChar(80)
+  dispatchMode           String?   @map("dispatch_mode") @db.VarChar(16)
+  cadenceConfig          Json?     @map("cadence_config")
+  scheduledAt            DateTime? @map("scheduled_at") @db.DateTime(3)
+  scheduledEndAt         DateTime? @map("scheduled_end_at") @db.DateTime(3)
+  dailySendLimit         Int?      @map("daily_send_limit")
+  dailySentDate          String?   @map("daily_sent_date") @db.VarChar(16)
+  dailySentCount         Int?      @map("daily_sent_count")
+  quietHours             Json?     @map("quiet_hours")
+  duplicatePolicy        String?   @map("duplicate_policy") @db.VarChar(24)
+  excludeRecentDays      Int?      @map("exclude_recent_days")
+  excludeTags            Json?     @map("exclude_tags")
+  excludeLeadClasses     Json?     @map("exclude_lead_classes")
+  importStats            Json?     @map("import_stats")
+  headerImageAssetId     String?   @map("header_image_asset_id") @db.VarChar(32)
+  headerImageStoragePath String?   @map("header_image_storage_path") @db.VarChar(500)
+  headerImageMode        String?   @map("header_image_mode") @db.VarChar(16)
+  headerImageMapping     String?   @map("header_image_mapping") @db.VarChar(160)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.DateTime(3)
+
+  jobs CampaignJob[]
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@index([companyId, status])
+  @@map("campaigns")
+}
+
+model CampaignJob {
+  id                     String   @id @default(cuid()) @db.VarChar(32)
+  campaignId             String   @map("campaign_id") @db.VarChar(32)
+  /// Denormalizado da campanha — substitui as queries collectionGroup("jobs").
+  companyId              String   @map("company_id") @db.VarChar(64)
+  contactId              String   @map("contact_id") @db.VarChar(32)
+  phone                  String   @db.VarChar(32)
+  contactName            String?  @map("contact_name") @db.VarChar(160)
+  parameters             Json
+  headerImageStoragePath String?  @map("header_image_storage_path") @db.VarChar(500)
+  headerImageLink        String?  @map("header_image_link") @db.VarChar(1000)
+  status                 String   @default("pending") @db.VarChar(16)
+  scheduledAt            DateTime @map("scheduled_at") @db.DateTime(3)
+  attempts               Int      @default(0)
+  lastError              String?  @map("last_error") @db.Text
+  whatsappMessageId      String?  @map("whatsapp_message_id") @db.VarChar(128)
+  deliveryPhone          String?  @map("delivery_phone") @db.VarChar(32)
+  messageStatus          String?  @map("message_status") @db.VarChar(24)
+  createdAt              DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, status, scheduledAt])
+  @@index([whatsappMessageId])
+  @@index([contactId, status])
+  @@index([companyId, contactId, createdAt])
+  @@map("campaign_jobs")
+}
+
+model QuickReply {
+  id        String   @id @default(cuid()) @db.VarChar(32)
+  companyId String   @map("company_id") @db.VarChar(64)
+  title     String   @db.VarChar(120)
+  body      String   @db.Text
+  scope     String   @default("company") @db.VarChar(16)
+  createdBy String?  @map("created_by") @db.VarChar(64)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId, scope, sortOrder])
+  @@map("quick_replies")
+}
+
+model ContactOrigin {
+  id        String   @id @default(cuid()) @db.VarChar(32)
+  companyId String   @map("company_id") @db.VarChar(64)
+  key       String   @db.VarChar(80)
+  label     String   @db.VarChar(120)
+  isSystem  Boolean  @default(false) @map("is_system")
+  fields    Json
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([companyId, key])
+  @@map("contact_origins")
+}
+
+model MediaAsset {
+  id          String   @id @default(cuid()) @db.VarChar(32)
+  companyId   String   @map("company_id") @db.VarChar(64)
+  name        String   @db.VarChar(160)
+  storagePath String   @map("storage_path") @db.VarChar(500)
+  mimeType    String   @map("mime_type") @db.VarChar(80)
+  filename    String   @db.VarChar(255)
+  source      String   @default("manual") @db.VarChar(16)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("media_assets")
+}
+
+model PipelineStage {
+  id        String   @id @default(cuid()) @db.VarChar(32)
+  companyId String   @map("company_id") @db.VarChar(64)
+  name      String   @db.VarChar(120)
+  order     Int      @default(0) @map("stage_order")
+  color     String?  @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId, order])
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id         String   @id @default(cuid()) @db.VarChar(32)
+  companyId  String   @map("company_id") @db.VarChar(64)
+  title      String   @db.VarChar(160)
+  contactId  String   @map("contact_id") @db.VarChar(32)
+  stageId    String   @map("stage_id") @db.VarChar(32)
+  value      Float?
+  source     String?  @db.VarChar(80)
+  assignedTo String?  @map("assigned_to") @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([companyId, stageId])
+  @@index([contactId])
+  @@map("deals")
+}
+
+model FunnelEvent {
+  id          String   @id @default(cuid()) @db.VarChar(32)
+  companyId   String   @map("company_id") @db.VarChar(64)
+  dealId      String   @map("deal_id") @db.VarChar(32)
+  fromStageId String?  @map("from_stage_id") @db.VarChar(32)
+  toStageId   String   @map("to_stage_id") @db.VarChar(32)
+  createdAt   DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([companyId, createdAt])
+  @@index([dealId])
+  @@map("funnel_events")
+}
+
+model IntegrationEvent {
+  id        String   @id @default(cuid()) @db.VarChar(32)
+  companyId String?  @map("company_id") @db.VarChar(64)
+  source    String   @db.VarChar(80)
+  payload   Json?
+  status    String   @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("integration_events")
+}
+
+model DailyStats {
+  id                  String   @id @db.VarChar(96)
+  companyId           String   @map("company_id") @db.VarChar(64)
+  date                String   @db.VarChar(8)
+  templatesSent       Int      @default(0) @map("templates_sent")
+  messagesSent        Int      @default(0) @map("messages_sent")
+  messagesReceived    Int      @default(0) @map("messages_received")
+  messagesDelivered   Int      @default(0) @map("messages_delivered")
+  messagesRead        Int      @default(0) @map("messages_read")
+  messagesFailed      Int      @default(0) @map("messages_failed")
+  optOuts             Int      @default(0) @map("opt_outs")
+  uniqueRecipients24h Int      @default(0) @map("unique_recipients_24h")
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@unique([companyId, date])
+  @@map("stats_daily")
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid()) @db.VarChar(32)
+  companyId  String   @map("company_id") @db.VarChar(64)
+  provider   String   @db.VarChar(32)
+  eventType  String   @map("event_type") @db.VarChar(64)
+  phone      String?  @db.VarChar(32)
+  messageId  String?  @map("message_id") @db.VarChar(128)
+  status     String   @db.VarChar(16)
+  error      String?  @db.Text
+  eventCount Int?     @map("event_count")
+  createdAt  DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([companyId, createdAt(sort: Desc)])
+  @@map("webhook_events")
+}
+
+model WhatsAppMessageRef {
+  whatsappMessageId String   @id @map("whatsapp_message_id") @db.VarChar(128)
+  companyId         String   @map("company_id") @db.VarChar(64)
+  conversationId    String   @map("conversation_id") @db.VarChar(32)
+  messageId         String   @map("message_id") @db.VarChar(32)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@index([conversationId])
+  @@map("whatsapp_message_refs")
+}
+
+model Presence {
+  companyId      String   @map("company_id") @db.VarChar(64)
+  uid            String   @db.VarChar(64)
+  name           String?  @db.VarChar(120)
+  email          String?  @db.VarChar(160)
+  role           String?  @db.VarChar(24)
+  status         String   @default("online") @db.VarChar(16)
+  currentSurface String   @default("api") @map("current_surface") @db.VarChar(16)
+  currentPath    String?  @map("current_path") @db.VarChar(255)
+  lastSeenAt     DateTime @map("last_seen_at") @db.DateTime(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.DateTime(3)
+
+  @@id([companyId, uid])
+  @@map("company_presence")
+}

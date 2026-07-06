@@ -48,7 +48,9 @@ O `predev` copia o checklist para `public/checklist/`.
 
 ## Cron de campanhas
 
-Configure um job externo (ex.: Vercel Cron) para:
+O deploy na VPS provisiona `/etc/cron.d/ultra-campaigns` automaticamente (a cada
+minuto, usando o `CRON_SECRET` do `.env.production`). Em outros ambientes,
+configure um job externo para:
 
 ```http
 POST /api/campaigns/process

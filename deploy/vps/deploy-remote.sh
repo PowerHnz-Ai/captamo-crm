@@ -30,7 +30,28 @@ set -a
 # shellcheck disable=SC1091
 source .env.production
 set +a
+
+echo "==> Aplicando migrations do MariaDB..."
+npx prisma migrate deploy
+
+echo "==> Seed mínimo (empresa padrão + conexão)..."
+if [ -f scripts/seed-company.mjs ]; then
+  node scripts/seed-company.mjs || true
+fi
+
 npm run build
+
+# Cron de campanhas: processa agendadas/cadência a cada minuto.
+echo "==> Provisionando cron de campanhas..."
+if [ -z "${CRON_SECRET:-}" ]; then
+  echo "AVISO: CRON_SECRET ausente no .env.production — cron de campanhas NÃO instalado."
+else
+  cat > /etc/cron.d/ultra-campaigns <<CRON
+* * * * * root curl -s -m 55 -X POST -H "Authorization: Bearer ${CRON_SECRET}" http://127.0.0.1:3010/api/campaigns/process >/var/log/ultra-campaigns-cron.log 2>&1
+CRON
+  chmod 644 /etc/cron.d/ultra-campaigns
+  echo "cron instalado em /etc/cron.d/ultra-campaigns"
+fi
 
 PM2_CONFIG="deploy/vps/ecosystem.config.cjs"
 
@@ -41,11 +62,6 @@ else
   pm2 start "$PM2_CONFIG"
 fi
 pm2 save
-
-if [ -f scripts/backfill-whatsapp-message-refs.mjs ]; then
-  echo "==> Atualizando refs de mensagens WhatsApp..."
-  node scripts/backfill-whatsapp-message-refs.mjs || true
-fi
 
 echo "==> Health check local..."
 sleep 2

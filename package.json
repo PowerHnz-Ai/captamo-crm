@@ -10,9 +10,14 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "postinstall": "node -e \"try{require('ffmpeg-static/install')}catch(e){}\""
+    "postinstall": "node -e \"try{require('ffmpeg-static/install')}catch(e){}\" && prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "@prisma/adapter-mariadb": "^7.8.0",
+    "@prisma/client": "^7.8.0",
     "date-fns": "^4.4.0",
     "ffmpeg-static": "^5.3.0",
     "firebase": "^12.15.0",
@@ -20,6 +25,7 @@
     "framer-motion": "^12.41.0",
     "lucide-react": "^1.21.0",
     "next": "16.2.9",
+    "prisma": "^7.8.0",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
