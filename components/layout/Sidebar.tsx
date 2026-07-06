@@ -25,7 +25,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   UserCircle,
-  Building2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -42,8 +41,6 @@ type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
   permission?: Permission;
-  /** Visível apenas para o super-admin da plataforma (dono). */
-  platformOnly?: boolean;
 };
 
 const mainNavItems: NavItem[] = [
@@ -68,12 +65,6 @@ const settingsNavItems: NavItem[] = [
     label: "Conexões",
     icon: Smartphone,
     permission: "integrations.view",
-  },
-  {
-    href: "/settings/clients",
-    label: "Clientes",
-    icon: Building2,
-    platformOnly: true,
   },
   { href: "/settings/team", label: "Equipe", icon: Users, permission: "team.view" },
   { href: "/settings/profile", label: "Meu perfil", icon: UserCircle },
@@ -202,10 +193,9 @@ export function Sidebar({ mode = "api", onlineCount }: SidebarProps) {
   const visibleMain = mainNavItems.filter(
     (item) => !item.permission || can(item.permission)
   );
-  const visibleSettings = settingsNavItems.filter((item) => {
-    if (item.platformOnly) return profile?.platformAdmin === true;
-    return !item.permission || can(item.permission);
-  });
+  const visibleSettings = settingsNavItems.filter(
+    (item) => !item.permission || can(item.permission)
+  );
   const showSettings = visibleSettings.length > 0;
 
   if (mode === "operacional") {

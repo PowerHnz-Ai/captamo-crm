@@ -1,6 +1,7 @@
 "use client";
 
 import { getAuthToken } from "./auth-token";
+import { getImpersonation, IMPERSONATION_HEADER } from "./impersonation";
 
 export async function apiFetch(
   input: string,
@@ -22,6 +23,13 @@ export async function apiFetch(
     throw new Error("Sessão expirada. Faça login novamente.");
   }
   headers.set("Authorization", `Bearer ${token}`);
+
+  // Platform admin atuando como uma clínica: o server só honra o header
+  // para platform admins; para os demais é ignorado.
+  const impersonation = getImpersonation();
+  if (impersonation && !headers.has(IMPERSONATION_HEADER)) {
+    headers.set(IMPERSONATION_HEADER, impersonation.companyId);
+  }
 
   const res = await fetch(input, { ...init, headers });
 

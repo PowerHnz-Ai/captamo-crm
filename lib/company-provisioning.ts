@@ -106,11 +106,44 @@ export interface CompanySummary {
   id: string;
   name: string;
   createdAt: number | null;
+  userCount: number;
+  whatsappConfigured: boolean;
 }
 
-/** Lista as empresas cadastradas (docs companies) para a tela de clientes. */
+/** Lista as empresas cadastradas (docs companies) para o painel da plataforma. */
 export async function listClientCompanies(): Promise<CompanySummary[]> {
-  const snap = await getDb().collection("companies").get();
+  const db = getDb();
+  const snap = await db.collection("companies").get();
+  const ids = snap.docs.map((doc) => doc.id);
+
+  // Nº de usuários por empresa (aggregate count — barato) e status da API
+  // WhatsApp (um findMany só no MariaDB).
+  const [userCounts, settings] = await Promise.all([
+    Promise.all(
+      ids.map((id) =>
+        db
+          .collection("users")
+          .where("companyId", "==", id)
+          .count()
+          .get()
+          .then((res) => [id, res.data().count] as const)
+          .catch(() => [id, 0] as const)
+      )
+    ),
+    ids.length
+      ? import("./db").then(({ getSql }) =>
+          getSql().companySettings.findMany({
+            where: { companyId: { in: ids } },
+            select: { companyId: true, apiKeySecret: true },
+          })
+        )
+      : Promise.resolve([]),
+  ]);
+  const userCountById = new Map(userCounts);
+  const whatsappById = new Map(
+    settings.map((s) => [s.companyId, Boolean(s.apiKeySecret)])
+  );
+
   return snap.docs
     .map((doc) => {
       const data = doc.data() as { name?: string; createdAt?: Timestamp };
@@ -118,6 +151,8 @@ export async function listClientCompanies(): Promise<CompanySummary[]> {
         id: doc.id,
         name: data.name || doc.id,
         createdAt: data.createdAt?.toMillis?.() ?? null,
+        userCount: userCountById.get(doc.id) ?? 0,
+        whatsappConfigured: whatsappById.get(doc.id) ?? false,
       };
     })
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));

@@ -2,8 +2,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCompanyContextOrError } from "@/lib/request-company";
-import { requirePlatformAdmin } from "@/lib/platform-admin";
+import { resolvePlatformAdminOrError } from "@/lib/platform-admin";
 
 /**
  * Exclui um cliente por completo (contas, checklist e dados do CRM).
@@ -13,12 +12,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ companyId: string }> }
 ) {
-  const authResult = await resolveCompanyContextOrError(request);
-  if (!authResult.ok) {
-    return NextResponse.json({ error: authResult.error }, { status: authResult.status });
-  }
-
-  const guard = requirePlatformAdmin(authResult.context.auth);
+  const guard = await resolvePlatformAdminOrError(request);
   if (!guard.ok) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }

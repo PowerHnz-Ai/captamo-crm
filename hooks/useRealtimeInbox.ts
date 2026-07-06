@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getAuthToken } from "@/lib/auth-token";
+import { getImpersonation } from "@/lib/impersonation";
 import type { RealtimeEvent } from "@/lib/realtime";
 
 const BACKOFF_STEPS_MS = [2_000, 5_000, 10_000, 30_000];
@@ -40,8 +41,13 @@ export function useRealtimeInbox({ enabled, onEvent }: UseRealtimeInboxOptions):
         return;
       }
 
+      // Impersonação lida fresca a cada (re)conexão — o canal segue a clínica.
+      const impersonation = getImpersonation();
+      const impersonateParam = impersonation
+        ? `&impersonate=${encodeURIComponent(impersonation.companyId)}`
+        : "";
       source = new EventSource(
-        `/api/realtime/stream?token=${encodeURIComponent(token)}`
+        `/api/realtime/stream?token=${encodeURIComponent(token)}${impersonateParam}`
       );
       source.onopen = () => {
         attempt = 0;

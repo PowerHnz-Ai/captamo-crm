@@ -1,5 +1,6 @@
 import { getAdminAuth, getDb, getAdminProjectId } from "./firebase-admin";
 import { isUserActive } from "./user-profiles";
+import { isPlatformAdmin } from "./platform-admin";
 
 export interface AuthContext {
   uid: string;
@@ -11,6 +12,8 @@ export interface AuthContext {
   username?: string;
   jobTitle?: string;
   photoStoragePath?: string;
+  /** Super-admin da plataforma (e-mail em PLATFORM_ADMIN_EMAILS). */
+  platformAdmin: boolean;
 }
 
 type UserDoc = {
@@ -46,57 +49,15 @@ function mapUserToAuth(uid: string, data: UserDoc, fallbackEmail?: string): Auth
     username: data.username,
     jobTitle: data.jobTitle,
     photoStoragePath: data.photoStoragePath,
+    platformAdmin: false,
   };
 }
 
 export async function verifyAuthToken(
   authorizationHeader: string | null
 ): Promise<AuthContext | null> {
-  if (!authorizationHeader?.startsWith("Bearer ")) {
-    return null;
-  }
-
-  const token = authorizationHeader.slice("Bearer ".length).trim();
-  if (!token) return null;
-
-  try {
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const profile = await getDb().collection("users").doc(decoded.uid).get();
-
-    if (!profile.exists) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn(
-          "[auth] Perfil Firestore ausente para uid:",
-          decoded.uid,
-          decoded.email
-        );
-      }
-      return null;
-    }
-
-    const data = profile.data() as UserDoc;
-
-    if (!data.companyId) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[auth] users/" + decoded.uid + " sem companyId");
-      }
-      return null;
-    }
-
-    if (!isUserActive(data)) {
-      if (process.env.NODE_ENV === "development") {
-        console.warn("[auth] users/" + decoded.uid + " desativado");
-      }
-      return null;
-    }
-
-    return mapUserToAuth(decoded.uid, data, decoded.email);
-  } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("[auth] verifyIdToken falhou:", error);
-    }
-    return null;
-  }
+  const { auth } = await verifyAuthTokenWithReason(authorizationHeader);
+  return auth;
 }
 
 export function getAuthFailureMessage(reason: AuthFailureReason): string {
@@ -131,6 +92,26 @@ export async function verifyAuthTokenWithReason(
   try {
     const decoded = await getAdminAuth().verifyIdToken(token);
     const profile = await getDb().collection("users").doc(decoded.uid).get();
+
+    // Platform admin (por e-mail, via env): autentica mesmo sem doc, sem
+    // companyId ou desativado — a identidade vem do env, não do Firestore.
+    if (isPlatformAdmin({ email: decoded.email })) {
+      const data = profile.exists ? (profile.data() as UserDoc) : {};
+      return {
+        auth: {
+          uid: decoded.uid,
+          email: data.email || decoded.email,
+          companyId: data.companyId || "",
+          role: data.role || "admin",
+          cargo: data.cargo,
+          name: data.name,
+          username: data.username,
+          jobTitle: data.jobTitle,
+          photoStoragePath: data.photoStoragePath,
+          platformAdmin: true,
+        },
+      };
+    }
 
     if (!profile.exists) {
       return { auth: null, reason: "profile_missing" };

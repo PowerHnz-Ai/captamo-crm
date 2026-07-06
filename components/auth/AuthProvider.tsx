@@ -19,6 +19,7 @@ import { getFirebaseAuth } from "@/lib/firebase-client";
 import { setAuthTokenGetter } from "@/lib/auth-token";
 import { apiFetch } from "@/lib/api-fetch";
 import { getUltraMode, isApiMode, type UltraMode } from "@/lib/ultra-mode";
+import { getImpersonation, stopImpersonation } from "@/lib/impersonation";
 import { getEffectiveRole, roleLabel } from "@/lib/roles";
 import type { UserRole } from "@/lib/types";
 
@@ -148,6 +149,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!user || !profile) return;
+    // Sem presença no painel da plataforma nem durante impersonação — o
+    // admin não deve aparecer como "online" na equipe da clínica.
+    if (pathname.startsWith("/platform") || getImpersonation()) return;
 
     const sendHeartbeat = async () => {
       try {
@@ -182,6 +186,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const platformPath = pathname.startsWith("/platform");
+
+    // Painel da plataforma: só para platform admins (fora do guard de modo).
+    if (user && platformPath) {
+      if (profile && !profile.platformAdmin) {
+        router.replace("/hub");
+      }
+      return;
+    }
+
+    // Platform admin sem impersonação ativa: o hub vira /platform.
+    if (user && pathname === "/hub" && profile?.platformAdmin && !getImpersonation()) {
+      router.replace("/platform");
+      return;
+    }
+
     if (user && pathname !== "/hub" && pathname !== "/login" && !isChecklistPath(pathname)) {
       const mode = getUltraMode();
       const settingsPath = pathname.startsWith("/settings");
@@ -204,7 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         router.replace("/");
       }
     }
-  }, [user, loading, pathname, router]);
+  }, [user, loading, pathname, router, profile]);
 
   async function login(email: string, password: string) {
     const auth = getFirebaseAuth();
@@ -217,6 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // ignore
     }
+    stopImpersonation();
     const auth = getFirebaseAuth();
     await signOut(auth);
     router.replace("/login");

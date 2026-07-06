@@ -5,10 +5,32 @@ import {
   getAuthFailureMessage,
   type AuthContext,
 } from "./auth-server";
+import { IMPERSONATION_HEADER } from "./impersonation";
 
 export interface RequestCompanyContext {
   companyId: string;
   auth: AuthContext | null;
+  /** true quando um platform admin está atuando como esta empresa. */
+  impersonated?: boolean;
+}
+
+/**
+ * Impersonação: platform admin atuando como uma empresa. O header só é
+ * honrado para platform admins; para qualquer outro usuário é ignorado
+ * silenciosamente (storage residual nunca deve soft-brickar uma sessão).
+ * Durante a impersonação o role é forçado a "admin" (poder total na empresa).
+ */
+function applyImpersonation(
+  request: NextRequest,
+  auth: AuthContext
+): RequestCompanyContext | null {
+  const target = request.headers.get(IMPERSONATION_HEADER)?.trim();
+  if (!target || !auth.platformAdmin) return null;
+  return {
+    companyId: target,
+    auth: { ...auth, companyId: target, role: "admin", cargo: undefined },
+    impersonated: true,
+  };
 }
 
 export async function resolveCompanyContext(
@@ -19,8 +41,10 @@ export async function resolveCompanyContext(
     request.headers.get("authorization")
   );
 
-  if (auth?.companyId) {
-    return { companyId: auth.companyId, auth };
+  if (auth) {
+    const impersonated = applyImpersonation(request, auth);
+    if (impersonated) return impersonated;
+    if (auth.companyId) return { companyId: auth.companyId, auth };
   }
 
   if (options?.allowDefault) {
@@ -47,13 +71,17 @@ export async function resolveCompanyContextOrError(
   const header = request.headers.get("authorization");
   const { auth, reason } = await verifyAuthTokenWithReason(header);
 
-  if (auth?.companyId) {
-    return { ok: true, context: { companyId: auth.companyId, auth } };
+  if (auth) {
+    const impersonated = applyImpersonation(request, auth);
+    if (impersonated) return { ok: true, context: impersonated };
+    if (auth.companyId) {
+      return { ok: true, context: { companyId: auth.companyId, auth } };
+    }
   }
 
   return {
     ok: false,
-    error: getAuthFailureMessage(reason || "missing_header"),
+    error: getAuthFailureMessage(reason || "company_missing"),
     status: 401,
   };
 }

@@ -17,10 +17,16 @@ const MAX_STREAM_LIFETIME_MS = 55 * 60_000;
 export async function GET(request: NextRequest) {
   const token = request.nextUrl.searchParams.get("token") || "";
   const { auth } = await verifyAuthTokenWithReason(token ? `Bearer ${token}` : null);
-  if (!auth?.companyId) {
+  if (!auth) {
     return Response.json({ error: "Não autorizado." }, { status: 401 });
   }
-  const companyId = auth.companyId;
+  // Impersonação (platform admin atuando como clínica): canal da clínica.
+  const impersonate = request.nextUrl.searchParams.get("impersonate")?.trim();
+  const companyId =
+    impersonate && auth.platformAdmin ? impersonate : auth.companyId;
+  if (!companyId) {
+    return Response.json({ error: "Não autorizado." }, { status: 401 });
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({

@@ -1,21 +1,16 @@
-// Bootstrap do platform admin em um projeto Firebase novo (ovo-e-galinha do
-// primeiro login): cria/atualiza a conta adminultrahub@gmail.com e o doc
-// users/{uid}, e valida o login com a senha informada.
+// Bootstrap do platform admin em um projeto Firebase novo: cria/atualiza a
+// conta adminultrahub@gmail.com e o doc users/{uid}, e valida o login com a
+// senha informada. O platform admin NÃO precisa de empresa vinculada — após
+// o login ele cai no painel da plataforma (/platform).
 //
 // Uso:
-//   node scripts/bootstrap-platform-admin.mjs <senha> [companyId]
-//
-// - 1ª execução (sem empresa ainda): omita o companyId — usa o placeholder
-//   "BOOT". Faça login, cadastre a primeira empresa na tela Clientes e rode
-//   de novo com o código gerado para corrigir o doc.
-// - Execuções seguintes: passa o companyId real; a senha é redefinida para a
-//   informada e o doc é atualizado.
+//   node scripts/bootstrap-platform-admin.mjs <senha>
 //
 // Lê as credenciais Firebase de .env.production (VPS) ou .env.local (dev).
 import { readFileSync, existsSync } from "fs";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
-import { getFirestore } from "firebase-admin/firestore";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 const EMAIL = "adminultrahub@gmail.com";
 
@@ -40,9 +35,8 @@ function loadEnv() {
 }
 
 const PASSWORD = process.argv[2];
-const COMPANY_ID = process.argv[3] || "BOOT";
 if (!PASSWORD || PASSWORD.length < 8) {
-  console.error("uso: node scripts/bootstrap-platform-admin.mjs <senha (mín. 8)> [companyId]");
+  console.error("uso: node scripts/bootstrap-platform-admin.mjs <senha (mín. 8)>");
   process.exit(1);
 }
 
@@ -81,23 +75,23 @@ try {
 }
 
 const db = getFirestore();
-await db.doc(`users/${user.uid}`).set(
+const docRef = db.doc(`users/${user.uid}`);
+const existing = await docRef.get();
+await docRef.set(
   {
     name: "Ultra Hub Admin",
     email: EMAIL,
-    companyId: COMPANY_ID,
     role: "admin",
     active: true,
-    createdAt: new Date(),
+    createdAt: existing.exists ? existing.get("createdAt") || new Date() : new Date(),
+    // Placeholder de versões antigas do bootstrap — não é mais necessário.
+    ...(existing.get("companyId") === "BOOT"
+      ? { companyId: FieldValue.delete() }
+      : {}),
   },
   { merge: true }
 );
-console.log(`doc users/${user.uid} gravado (companyId: ${COMPANY_ID})`);
-if (COMPANY_ID === "BOOT") {
-  console.log(
-    "LEMBRETE: após cadastrar a primeira empresa, rode de novo com o código dela como 2º argumento."
-  );
-}
+console.log(`doc users/${user.uid} gravado (sem vínculo de empresa — painel /platform)`);
 
 // Valida o login com a senha informada.
 const signIn = await fetch(

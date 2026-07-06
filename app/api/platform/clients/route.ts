@@ -1,17 +1,11 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { resolveCompanyContextOrError } from "@/lib/request-company";
-import { requirePlatformAdmin } from "@/lib/platform-admin";
+import { resolvePlatformAdminOrError } from "@/lib/platform-admin";
 import { createClientSchema } from "@/lib/validators";
 
 export async function GET(request: NextRequest) {
-  const authResult = await resolveCompanyContextOrError(request);
-  if (!authResult.ok) {
-    return NextResponse.json({ error: authResult.error }, { status: authResult.status });
-  }
-
-  const guard = requirePlatformAdmin(authResult.context.auth);
+  const guard = await resolvePlatformAdminOrError(request);
   if (!guard.ok) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
@@ -27,12 +21,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const authResult = await resolveCompanyContextOrError(request);
-  if (!authResult.ok) {
-    return NextResponse.json({ error: authResult.error }, { status: authResult.status });
-  }
-
-  const guard = requirePlatformAdmin(authResult.context.auth);
+  const guard = await resolvePlatformAdminOrError(request);
   if (!guard.ok) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }

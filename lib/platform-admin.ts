@@ -1,3 +1,4 @@
+import type { NextRequest } from "next/server";
 import type { AuthContext } from "./auth-server";
 
 /**
@@ -32,6 +33,40 @@ export function requirePlatformAdmin(
   }
   if (!isPlatformAdmin(auth)) {
     return { ok: false, status: 403, error: "Ação restrita ao administrador da plataforma." };
+  }
+  return { ok: true, auth };
+}
+
+/**
+ * Autentica e exige platform admin SEM exigir companyId — o admin da
+ * plataforma pode não ter empresa própria. Usar nas rotas /api/platform/*.
+ * (Import dinâmico do auth-server para evitar ciclo de módulos: auth-server
+ * importa isPlatformAdmin daqui.)
+ */
+export async function resolvePlatformAdminOrError(
+  request: NextRequest
+): Promise<
+  { ok: true; auth: AuthContext } | { ok: false; status: number; error: string }
+> {
+  const { verifyAuthTokenWithReason, getAuthFailureMessage } = await import(
+    "./auth-server"
+  );
+  const { auth, reason } = await verifyAuthTokenWithReason(
+    request.headers.get("authorization")
+  );
+  if (!auth) {
+    return {
+      ok: false,
+      status: 401,
+      error: getAuthFailureMessage(reason || "missing_header"),
+    };
+  }
+  if (!auth.platformAdmin) {
+    return {
+      ok: false,
+      status: 403,
+      error: "Ação restrita ao administrador da plataforma.",
+    };
   }
   return { ok: true, auth };
 }

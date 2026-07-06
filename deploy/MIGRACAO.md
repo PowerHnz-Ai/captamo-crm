@@ -98,16 +98,16 @@ webhook da Meta de volta e seguir no antigo.
 ## Etapa E — Bootstrap dos dados no sistema novo
 
 1. Na VPS nova: `cd /var/www/ultra-api && node scripts/bootstrap-platform-admin.mjs "<senha>"`
-   (cria `adminultrahub@gmail.com` com companyId placeholder `BOOT`).
-2. Login no CRM novo → tela **Clientes** → cadastrar **Mister Odonto**
+   (cria `adminultrahub@gmail.com`; o admin não precisa de empresa vinculada —
+   após o login ele cai no **painel da plataforma** `/platform`).
+2. Login no CRM novo → painel `/platform` → cadastrar **Mister Odonto**
    (empresa + gerente) → **anotar o código** gerado.
-3. Corrigir o admin e a empresa padrão:
+3. Definir a empresa padrão do webhook:
    ```bash
-   node scripts/bootstrap-platform-admin.mjs "<senha>" <CODIGO_NOVO>
    # editar .env.production: CRM_DEFAULT_COMPANY_ID=<CODIGO_NOVO>
    pm2 restart ultra-api --update-env
    ```
-4. Tela Clientes → botão **WhatsApp** da Mister Odonto → cadastrar
+4. No painel `/platform` → botão **WhatsApp** da Mister Odonto → cadastrar
    token/phoneNumberId/WABA atuais (o modal valida na Meta).
 
 ## Etapa F — Meta e testes fim-a-fim (fora do horário de uso)
