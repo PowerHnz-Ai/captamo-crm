@@ -13,6 +13,7 @@ import { Select } from "@/components/ui/Select";
 import { appAlert, appConfirm } from "@/lib/app-dialog";
 import { leadClassShortLabel } from "@/lib/lead-class";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
+import { usePermissions } from "@/hooks/usePermissions";
 import type { Contact, ContactList, ContactOrigin, ContactOriginField } from "@/lib/types";
 
 function formatOriginFieldValue(value: string, field: ContactOriginField): string {
@@ -23,12 +24,23 @@ function formatOriginFieldValue(value: string, field: ContactOriginField): strin
   return value;
 }
 
+const PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 350;
+
 export default function ContactsPage() {
-  const [allContacts, setAllContacts] = useState<Contact[]>([]);
+  const { can } = usePermissions();
+  const canWrite = can("contacts.write");
+  const canImport = can("contacts.import");
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [allTags, setAllTags] = useState<string[]>([]);
   const [lists, setLists] = useState<ContactList[]>([]);
   const [origins, setOrigins] = useState<ContactOrigin[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [tagFilter, setTagFilter] = useState("");
   const [activeOriginTab, setActiveOriginTab] = useState<string>("all");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -38,55 +50,65 @@ export default function ContactsPage() {
 
   const [loadError, setLoadError] = useState("");
 
-  async function loadContacts(): Promise<{
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  async function loadPage(targetPage: number): Promise<{
     contacts: Contact[];
-    lists: ContactList[];
-    origins: ContactOrigin[];
+    total: number;
   }> {
     const params = new URLSearchParams();
-    if (search) params.set("search", search);
+    params.set("limit", String(PAGE_SIZE));
+    params.set("offset", String((targetPage - 1) * PAGE_SIZE));
+    if (debouncedSearch) params.set("search", debouncedSearch);
     if (tagFilter) params.set("tag", tagFilter);
+    if (activeOriginTab !== "all") params.set("originId", activeOriginTab);
 
-    const [contactsRes, listsRes, originsRes] = await Promise.all([
-      apiFetch(`/api/contacts?${params}`),
+    const res = await apiFetch(`/api/contacts?${params}`);
+    const data = await parseApiJson<{
+      contacts?: Contact[];
+      total?: number;
+      error?: string;
+    }>(res);
+    if (!res.ok) throw new Error(data.error || "Erro ao carregar contatos.");
+    return { contacts: data.contacts || [], total: data.total || 0 };
+  }
+
+  async function loadCounts() {
+    try {
+      const res = await apiFetch("/api/contacts/counts");
+      const data = await parseApiJson<{
+        counts?: Record<string, number>;
+        tags?: string[];
+        error?: string;
+      }>(res);
+      if (res.ok) {
+        setCounts(data.counts || {});
+        setAllTags(data.tags || []);
+      }
+    } catch {
+      // contadores são informativos — não bloqueiam a tela
+    }
+  }
+
+  async function loadListsAndOrigins() {
+    const [listsRes, originsRes] = await Promise.all([
       apiFetch("/api/contact-lists"),
       apiFetch("/api/contact-origins"),
     ]);
-
-    const contactData = await parseApiJson<{ contacts?: Contact[]; error?: string }>(
-      contactsRes
-    );
     const listData = await parseApiJson<{ lists?: ContactList[]; error?: string }>(
       listsRes
     );
     const originData = await parseApiJson<{ origins?: ContactOrigin[]; error?: string }>(
       originsRes
     );
-
-    if (!contactsRes.ok) {
-      throw new Error(contactData.error || "Erro ao carregar contatos.");
-    }
-
     if (!listsRes.ok) {
       console.warn("[contacts] listas:", listData.error || listsRes.status);
     }
-
-    return {
-      contacts: contactData.contacts || [],
-      lists: listsRes.ok ? listData.lists || [] : [],
-      origins: originsRes.ok ? originData.origins || [] : [],
-    };
-  }
-
-  function applyContacts(data: {
-    contacts: Contact[];
-    lists: ContactList[];
-    origins: ContactOrigin[];
-  }) {
-    setAllContacts(data.contacts);
-    setLists(data.lists);
-    setOrigins(data.origins);
-    setLoadError("");
+    setLists(listsRes.ok ? listData.lists || [] : []);
+    setOrigins(originsRes.ok ? originData.origins || [] : []);
   }
 
   const activeOrigin = useMemo(
@@ -94,18 +116,7 @@ export default function ContactsPage() {
     [origins, activeOriginTab]
   );
 
-  const contacts = useMemo(() => {
-    if (activeOriginTab === "all") return allContacts;
-    return allContacts.filter((c) => c.originId === activeOriginTab);
-  }, [allContacts, activeOriginTab]);
-
-  const originCounts = useMemo(() => {
-    const counts: Record<string, number> = { all: allContacts.length };
-    for (const origin of origins) {
-      counts[origin.id] = allContacts.filter((c) => c.originId === origin.id).length;
-    }
-    return counts;
-  }, [allContacts, origins]);
+  const originCounts = counts;
 
   const tableOriginFields = useMemo(() => {
     if (activeOriginTab === "all") return [];
@@ -118,43 +129,36 @@ export default function ContactsPage() {
     return origin?.label || contact.originId;
   }
 
-  function matchesFilters(contact: Contact): boolean {
-    if (activeOriginTab !== "all" && contact.originId !== activeOriginTab) return false;
-    if (tagFilter && !contact.tags?.includes(tagFilter)) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const hit =
-        contact.name.toLowerCase().includes(q) ||
-        contact.phone.includes(q) ||
-        contact.tags?.some((t) => t.toLowerCase().includes(q));
-      if (!hit) return false;
-    }
-    return true;
-  }
-
-  function reloadContacts(created?: Contact) {
-    if (created && matchesFilters(created)) {
-      setAllContacts((prev) => {
-        const exists = prev.some((c) => c.id === created.id);
-        if (exists) return prev;
-        return [created, ...prev];
-      });
-    }
-
+  function reloadContacts() {
     setLoading(true);
-    loadContacts()
-      .then(applyContacts)
+    loadPage(page)
+      .then((data) => {
+        setContacts(data.contacts);
+        setTotal(data.total);
+        setLoadError("");
+      })
       .catch((err) => {
         setLoadError(err instanceof Error ? err.message : "Erro ao carregar contatos.");
       })
       .finally(() => setLoading(false));
+    void loadCounts();
   }
+
+  // Filtros mudaram → volta à primeira página.
+  useEffect(() => {
+    setPage(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedSearch, tagFilter, activeOriginTab]);
 
   useEffect(() => {
     let active = true;
-    loadContacts()
+    setLoading(true);
+    loadPage(page)
       .then((data) => {
-        if (active) applyContacts(data);
+        if (!active) return;
+        setContacts(data.contacts);
+        setTotal(data.total);
+        setLoadError("");
       })
       .catch((err) => {
         if (active) {
@@ -164,12 +168,17 @@ export default function ContactsPage() {
       .finally(() => {
         if (active) setLoading(false);
       });
-
     return () => {
       active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when filters change
-  }, [search, tagFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refetch when filters/page change
+  }, [debouncedSearch, tagFilter, activeOriginTab, page]);
+
+  useEffect(() => {
+    void loadCounts();
+    void loadListsAndOrigins();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function saveTags(id: string) {
     const tags = editTags
@@ -202,7 +211,7 @@ export default function ContactsPage() {
       });
       const data = await parseApiJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error || "Erro ao excluir contato.");
-      setAllContacts((prev) => prev.filter((c) => c.id !== contact.id));
+      reloadContacts();
     } catch (err) {
       await appAlert(err instanceof Error ? err.message : "Erro ao excluir contato.", {
         title: "Erro",
@@ -213,23 +222,29 @@ export default function ContactsPage() {
     }
   }
 
-  const allTags = [...new Set(allContacts.flatMap((c) => c.tags || []))];
-
   const tabLabel =
     activeOriginTab === "all"
       ? "Todos"
       : `${activeOrigin?.label ?? "Origem"} (${originCounts[activeOriginTab] ?? 0})`;
 
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageStart = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(total, (page - 1) * PAGE_SIZE + contacts.length);
+
   return (
     <AppShell title="Contatos" subtitle="Gerencie leads por origem, tags e importação Excel">
       <div className="space-y-6">
-        <div className="grid gap-6 lg:grid-cols-2">
-          <ContactForm
-            onCreated={reloadContacts}
-            defaultOriginId={activeOriginTab !== "all" ? activeOriginTab : undefined}
-          />
-          <ContactImport onImported={reloadContacts} />
-        </div>
+        {(canWrite || canImport) && (
+          <div className="grid gap-6 lg:grid-cols-2">
+            {canWrite && (
+              <ContactForm
+                onCreated={reloadContacts}
+                defaultOriginId={activeOriginTab !== "all" ? activeOriginTab : undefined}
+              />
+            )}
+            {canImport && <ContactImport onImported={reloadContacts} />}
+          </div>
+        )}
 
         <Card hover={false}>
           <div className="mb-4 flex flex-wrap gap-2 border-b border-app-border pb-4">
@@ -265,11 +280,8 @@ export default function ContactsPage() {
               id="search"
               label="Buscar"
               value={search}
-              onChange={(e) => {
-                setLoading(true);
-                setSearch(e.target.value);
-              }}
-              placeholder="Nome, telefone ou tag"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Nome ou telefone"
               className="min-w-[200px] flex-1"
             />
             <div>
@@ -278,10 +290,7 @@ export default function ContactsPage() {
               </label>
               <Select
                 value={tagFilter}
-                onChange={(e) => {
-                  setLoading(true);
-                  setTagFilter(e.target.value);
-                }}
+                onChange={(e) => setTagFilter(e.target.value)}
               >
                 <option value="">Todas</option>
                 {allTags.map((tag) => (
@@ -304,7 +313,7 @@ export default function ContactsPage() {
           )}
 
           <h3 className="mb-4 font-display text-lg font-semibold">
-            {tabLabel} — {contacts.length} contato(s)
+            {tabLabel} — {total} contato(s)
           </h3>
           {loadError && (
             <p className="mb-3 text-sm text-red-400">{loadError}</p>
@@ -397,35 +406,68 @@ export default function ContactsPage() {
                         </Badge>
                       </td>
                       <td className="py-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            variant="secondary"
-                            onClick={() => setEditingContact(contact)}
-                          >
-                            Editar
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            onClick={() => {
-                              setEditingId(contact.id);
-                              setEditTags((contact.tags || []).join(", "));
-                            }}
-                          >
-                            Tags
-                          </Button>
-                          <Button
-                            variant="danger"
-                            loading={deletingId === contact.id}
-                            onClick={() => handleDelete(contact)}
-                          >
-                            Excluir
-                          </Button>
-                        </div>
+                        {canWrite ? (
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="secondary"
+                              onClick={() => setEditingContact(contact)}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingId(contact.id);
+                                setEditTags((contact.tags || []).join(", "));
+                              }}
+                            >
+                              Tags
+                            </Button>
+                            <Button
+                              variant="danger"
+                              loading={deletingId === contact.id}
+                              onClick={() => handleDelete(contact)}
+                            >
+                              Excluir
+                            </Button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-app-muted">—</span>
+                        )}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {!loading && total > PAGE_SIZE && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-app-border pt-4">
+              <p className="text-sm text-app-muted">
+                Mostrando {pageStart}–{pageEnd} de {total} contato(s)
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </Button>
+                <span className="px-2 text-sm text-app-subtle">
+                  Página {page} de {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                >
+                  Próxima
+                </Button>
+              </div>
             </div>
           )}
         </Card>

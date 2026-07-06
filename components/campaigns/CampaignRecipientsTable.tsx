@@ -18,6 +18,7 @@ const PAGE_SIZE = 20;
 
 const statusTone: Record<ReturnType<typeof getJobDisplayStatus>, string> = {
   pending: "border-app-border text-app-muted bg-white/5",
+  processing: "border-blue-500/40 text-blue-300 bg-blue-500/10",
   skipped: "border-amber-500/40 text-amber-300 bg-amber-500/10",
   failed: "border-red-500/40 text-red-300 bg-red-500/10",
   accepted: "border-blue-500/40 text-blue-300 bg-blue-500/10",

@@ -84,8 +84,13 @@ export function ConnectionSwitcher({
       setOpen(false);
     }
 
-    function handleScroll() {
-      setOpen(false);
+    function handleScroll(e: Event) {
+      // Rolagem dentro do próprio menu não fecha.
+      if (e.target instanceof Node && menuRef.current?.contains(e.target)) {
+        return;
+      }
+      // Rolagem fora: segue o botão em vez de fechar.
+      updateMenuPosition();
     }
 
     function handleResize() {

@@ -10,6 +10,7 @@ import { UserAvatar } from "@/components/users/UserAvatar";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
 import { roleLabel } from "@/lib/roles";
+import { changeOwnPassword, passwordErrorMessage } from "@/lib/password-actions";
 
 export default function ProfileSettingsPage() {
   const { profile, refreshProfile } = useAuth();
@@ -25,6 +26,40 @@ export default function ProfileSettingsPage() {
   const [success, setSuccess] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingImageUrlRef = useRef<string | null>(null);
+
+  // Troca de senha (usuário logado).
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError("");
+    setPwSuccess("");
+    if (newPassword.length < 6) {
+      setPwError("A nova senha deve ter pelo menos 6 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("A confirmação não confere com a nova senha.");
+      return;
+    }
+    setPwSaving(true);
+    try {
+      await changeOwnPassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setPwSuccess("Senha alterada com sucesso.");
+    } catch (err) {
+      setPwError(passwordErrorMessage(err));
+    } finally {
+      setPwSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!profile) return;
@@ -205,6 +240,44 @@ export default function ProfileSettingsPage() {
               </Button>
             </form>
           )}
+        </Card>
+
+        <Card className="mt-6 p-6">
+          <h2 className="mb-1 text-sm font-semibold text-app-text">Segurança</h2>
+          <p className="mb-4 text-xs text-app-muted">
+            Troque sua senha de acesso. Você precisará informar a senha atual.
+          </p>
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <Input
+              label="Senha atual"
+              type="password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+            <Input
+              label="Nova senha"
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+            <Input
+              label="Confirmar nova senha"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+            />
+            {pwError && <p className="text-sm text-red-400">{pwError}</p>}
+            {pwSuccess && <p className="text-sm text-emerald-400">{pwSuccess}</p>}
+            <Button type="submit" loading={pwSaving}>
+              Alterar senha
+            </Button>
+          </form>
         </Card>
       </div>
 

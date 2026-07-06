@@ -13,6 +13,7 @@ export interface InboxFiltersState {
   windowFilter: string;
   periodFilter: InboxPeriodFilter;
   tagFilter: string;
+  labelFilter: string;
   assigneeFilter: string;
   unreadOnly: boolean;
   mineOnly: boolean;
@@ -31,6 +32,7 @@ interface InboxFilterPanelProps {
   onChange: (patch: Partial<InboxFiltersState>) => void;
   activeCount: number;
   tagOptions: string[];
+  labelOptions?: string[];
   assigneeOptions: AssigneeOption[];
   showAssigneeFilter?: boolean;
   showMineFilter?: boolean;
@@ -44,6 +46,7 @@ export function countActiveInboxFilters(filters: InboxFiltersState): number {
   if (filters.windowFilter) count++;
   if (filters.periodFilter) count++;
   if (filters.tagFilter) count++;
+  if (filters.labelFilter) count++;
   if (filters.assigneeFilter) count++;
   if (filters.unreadOnly) count++;
   if (filters.mineOnly) count++;
@@ -58,6 +61,7 @@ export function InboxFilterPanel({
   onChange,
   activeCount,
   tagOptions,
+  labelOptions = [],
   assigneeOptions,
   showAssigneeFilter,
   showMineFilter,
@@ -83,6 +87,7 @@ export function InboxFilterPanel({
       windowFilter: "",
       periodFilter: "",
       tagFilter: "",
+      labelFilter: "",
       assigneeFilter: "",
       unreadOnly: false,
       mineOnly: false,
@@ -183,6 +188,25 @@ export function InboxFilterPanel({
                   {tagOptions.map((tag) => (
                     <option key={tag} value={tag}>
                       {tag}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            )}
+
+            {labelOptions.length > 0 && (
+              <div>
+                <label className="mb-1 block chat-text-meta text-app-subtle">
+                  Etiqueta da conversa
+                </label>
+                <Select
+                  value={filters.labelFilter}
+                  onChange={(e) => onChange({ labelFilter: e.target.value })}
+                >
+                  <option value="">Qualquer</option>
+                  {labelOptions.map((label) => (
+                    <option key={label} value={label}>
+                      {label}
                     </option>
                   ))}
                 </Select>

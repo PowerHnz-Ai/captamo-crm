@@ -8,6 +8,7 @@ import type { ConnectionOption } from "@/components/chat/ConnectionSwitcher";
 import { TemplatePanel, type TemplateSendPayload } from "@/components/chat/TemplatePanel";
 import { ContactProfileSheet } from "@/components/chat/ContactProfileSheet";
 import { ConversationActionsMenu } from "@/components/chat/ConversationActionsMenu";
+import { ConversationLabels } from "@/components/chat/ConversationLabels";
 import { ChatSkeleton } from "@/components/chat/ChatSkeleton";
 import { Badge } from "@/components/ui/Badge";
 import { UserAvatar } from "@/components/users/UserAvatar";
@@ -70,6 +71,7 @@ export function ChatPanel({
   const [pendingMessages, setPendingMessages] = useState<Message[]>([]);
   const [sendError, setSendError] = useState("");
   const [retryingMessageId, setRetryingMessageId] = useState<string | null>(null);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
   const pendingUrlsRef = useRef<string[]>([]);
   const phone = conversation?.phone || "";
   const connections = connectionsProp;
@@ -92,6 +94,7 @@ export function ChatPanel({
     setPendingMessages([]);
     setSendError("");
     setRetryingMessageId(null);
+    setReplyingTo(null);
     pendingUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     pendingUrlsRef.current = [];
   }, [conversation?.id]);
@@ -186,10 +189,7 @@ export function ChatPanel({
         ...(senderName && profile?.uid
           ? { sentByUid: profile.uid, sentByName: senderName }
           : {}),
-        createdAt: {
-          seconds: Math.floor(Date.now() / 1000),
-          nanoseconds: 0,
-        } as Message["createdAt"],
+        createdAt: Date.now(),
       };
       setPendingMessages((prev) => [...prev, pending]);
       return id;
@@ -276,7 +276,9 @@ export function ChatPanel({
   }
 
   async function sendText(body: string, options?: SendMessageOptions) {
+    setSendError("");
     const pendingId = addPending({ type: "text", body }, options);
+    const replyToMessageId = replyingTo?.id;
     try {
       const res = await apiFetch("/api/whatsapp/send-text", {
         method: "POST",
@@ -285,14 +287,92 @@ export function ChatPanel({
           to: phone,
           body,
           includeSenderName: options?.includeSenderName,
+          ...(replyToMessageId ? { replyToMessageId } : {}),
         }),
       });
       const data = await parseApiJson<{ error?: string }>(res);
       if (!res.ok) throw new Error(data.error || "Falha ao enviar");
+      setReplyingTo(null);
       await onReload();
+    } catch (err) {
+      // Servidor persiste a mensagem como "failed"; recarrega para exibi-la.
+      setSendError(err instanceof Error ? err.message : "Falha ao enviar.");
+      await onReload().catch(() => {});
+      throw err;
     } finally {
       removePending(pendingId);
     }
+  }
+
+  async function sendNote(body: string) {
+    if (!conversation?.id) return;
+    setSendError("");
+    try {
+      const res = await apiFetch(`/api/conversations/${conversation.id}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+      const data = await parseApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Falha ao salvar nota.");
+      await onReload();
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Falha ao salvar nota.");
+      throw err;
+    }
+  }
+
+  async function sendReaction(message: Message, emoji: string) {
+    if (!conversation?.id) return;
+    setSendError("");
+    try {
+      const res = await apiFetch("/api/whatsapp/send-reaction", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: conversation.id,
+          messageId: message.id,
+          emoji,
+        }),
+      });
+      const data = await parseApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Falha ao reagir.");
+      await onReload();
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Falha ao reagir.");
+    }
+  }
+
+  async function retryFailedText(message: Message) {
+    if (!conversation?.id) return;
+    setRetryingMessageId(message.id);
+    setSendError("");
+    try {
+      const res = await apiFetch("/api/whatsapp/send-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          to: phone,
+          body: message.body,
+          retryMessageId: message.id,
+        }),
+      });
+      const data = await parseApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Falha ao reenviar.");
+      await onReload();
+    } catch (err) {
+      setSendError(
+        err instanceof Error ? err.message : "Não foi possível reenviar."
+      );
+      await onReload().catch(() => {});
+    } finally {
+      setRetryingMessageId(null);
+    }
+  }
+
+  async function retryFailedMessage(message: Message) {
+    if (message.type === "text") return retryFailedText(message);
+    return retryFailedMedia(message);
   }
 
   async function uploadAndSendMedia(
@@ -401,10 +481,12 @@ export function ChatPanel({
           caption: params.caption,
           filename: uploadData.filename || params.file.name,
           includeSenderName: options?.includeSenderName,
+          ...(replyingTo?.id ? { replyToMessageId: replyingTo.id } : {}),
         }),
       });
       const sendData = await parseApiJson<{ error?: string; messageId?: string }>(sendRes);
       if (!sendRes.ok) throw new Error(sendData.error || "Falha ao enviar mídia");
+      setReplyingTo(null);
       removePending(pendingId);
       try {
         await onReload();
@@ -533,6 +615,12 @@ export function ChatPanel({
             <p className="truncate chat-text-meta text-app-muted">{phone}</p>
           </div>
         </button>
+        <div className="hidden max-w-[18rem] md:block">
+          <ConversationLabels
+            conversation={conversation}
+            onUpdated={onConversationUpdated}
+          />
+        </div>
         <div className="flex items-center gap-2">
           {conversation.assignedToName && (
             <div className="flex items-center gap-1.5 rounded-full border border-app-border bg-app-secondary/40 px-2 py-1">
@@ -610,10 +698,12 @@ export function ChatPanel({
               <MessageList
                 messages={allMessages}
                 conversationId={conversation.id}
-                onRetry={retryFailedMedia}
+                onRetry={retryFailedMessage}
                 retryingMessageId={retryingMessageId}
                 canDeleteForEveryone={canDeleteForEveryone}
                 onDeleteForEveryone={deleteForEveryone}
+                onReply={(message) => setReplyingTo(message)}
+                onReact={sendReaction}
                 hasMoreOlder={hasMoreOlder}
                 loadingOlder={loadingOlder}
                 onLoadOlder={onLoadOlder}
@@ -637,6 +727,9 @@ export function ChatPanel({
               contactPhone={conversation.phone}
               onSendText={sendText}
               onSendMedia={uploadAndSendMedia}
+              onSendNote={sendNote}
+              replyingTo={replyingTo}
+              onCancelReply={() => setReplyingTo(null)}
             />
           </div>
         </div>

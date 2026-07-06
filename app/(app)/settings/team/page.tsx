@@ -14,7 +14,8 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { usePermissions } from "@/hooks/usePermissions";
 import { appAlert, appConfirm } from "@/lib/app-dialog";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
-import { roleLabel } from "@/lib/roles";
+import { roleLabel, getEffectiveRole } from "@/lib/roles";
+import { sendResetEmail } from "@/lib/password-actions";
 import type { UserRole } from "@/lib/types";
 
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
@@ -51,6 +52,81 @@ export default function TeamSettingsPage() {
   const canViewTeam = can("team.view");
   const canManageRoles = can("team.manage_roles");
   const canViewOnline = can("team.view_online");
+
+  // Teto do ator: admin/platform admin podem tudo; gerente não toca em admin.
+  const actorIsAdmin =
+    profile?.effectiveRole === "admin" || profile?.platformAdmin === true;
+  const roleOptions = actorIsAdmin
+    ? ROLE_OPTIONS
+    : ROLE_OPTIONS.filter((o) => o.value !== "admin");
+  const canManageTarget = (targetRole: UserRole) =>
+    actorIsAdmin || targetRole !== "admin";
+
+  // Formulário de novo colaborador.
+  const [showAdd, setShowAdd] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addEmail, setAddEmail] = useState("");
+  const [addRole, setAddRole] = useState<UserRole>("member");
+  const [addSaving, setAddSaving] = useState(false);
+  const [addError, setAddError] = useState("");
+
+  async function createMember(e: React.FormEvent) {
+    e.preventDefault();
+    setAddSaving(true);
+    setAddError("");
+    try {
+      const res = await apiFetch("/api/team", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: addName.trim(),
+          email: addEmail.trim(),
+          role: addRole,
+        }),
+      });
+      const data = await parseApiJson<{ email?: string; error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Erro ao criar colaborador.");
+
+      let note = "";
+      try {
+        if (data.email) await sendResetEmail(data.email);
+        note = "\n\nUm e-mail para definir a senha foi enviado.";
+      } catch {
+        note =
+          "\n\nConta criada, mas o envio do e-mail falhou — use 'Esqueci minha senha' na tela de login.";
+      }
+      await appAlert(`Colaborador cadastrado!${note}`, {
+        title: "Colaborador criado",
+        variant: "success",
+      });
+      setAddName("");
+      setAddEmail("");
+      setAddRole("member");
+      setShowAdd(false);
+      loadUsers();
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : "Erro ao criar.");
+    } finally {
+      setAddSaving(false);
+    }
+  }
+
+  async function resetMemberPassword(email: string) {
+    const confirmed = await appConfirm(
+      `Enviar um e-mail de redefinição de senha para "${email}"?`,
+      { title: "Redefinir senha", confirmLabel: "Enviar" }
+    );
+    if (!confirmed) return;
+    try {
+      await sendResetEmail(email);
+      await appAlert("E-mail de redefinição enviado.", { variant: "success" });
+    } catch {
+      await appAlert("Não foi possível enviar o e-mail agora.", {
+        title: "Erro",
+        variant: "error",
+      });
+    }
+  }
 
   useEffect(() => {
     if (!authLoading && !canViewTeam) {
@@ -234,6 +310,83 @@ export default function TeamSettingsPage() {
         </Card>
       ) : (
         <Card hover={false}>
+          {canManageRoles && (
+            <div className="mb-4">
+              {!showAdd ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setShowAdd(true);
+                    setAddError("");
+                  }}
+                >
+                  + Adicionar colaborador
+                </Button>
+              ) : (
+                <form
+                  onSubmit={createMember}
+                  className="rounded-lg border border-app-border bg-app-secondary/30 p-4"
+                >
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Input
+                      id="add-name"
+                      label="Nome"
+                      value={addName}
+                      onChange={(e) => setAddName(e.target.value)}
+                      required
+                    />
+                    <Input
+                      id="add-email"
+                      label="E-mail"
+                      type="email"
+                      value={addEmail}
+                      onChange={(e) => setAddEmail(e.target.value)}
+                      required
+                    />
+                    <div>
+                      <label
+                        htmlFor="add-role"
+                        className="mb-1 block text-xs font-medium text-app-subtle"
+                      >
+                        Cargo
+                      </label>
+                      <Select
+                        id="add-role"
+                        compact
+                        value={addRole}
+                        onChange={(e) => setAddRole(e.target.value as UserRole)}
+                      >
+                        {roleOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                  {addError && (
+                    <p className="mt-2 text-sm text-red-400">{addError}</p>
+                  )}
+                  <div className="mt-3 flex gap-2">
+                    <Button type="submit" loading={addSaving}>
+                      Criar e enviar e-mail
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setShowAdd(false)}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                  <p className="mt-2 text-xs text-app-muted">
+                    O colaborador receberá um e-mail para definir a própria senha.
+                  </p>
+                </form>
+              )}
+            </div>
+          )}
           {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
           {loading ? (
             <p className="text-app-subtle">Carregando equipe...</p>
@@ -309,7 +462,7 @@ export default function TeamSettingsPage() {
                           )}
                         </td>
                         <td className="py-3 pr-4">
-                          {canManageRoles ? (
+                          {canManageRoles && canManageTarget(currentRole) ? (
                             <Select
                               compact
                               defaultValue={currentRole}
@@ -318,7 +471,7 @@ export default function TeamSettingsPage() {
                               }
                               disabled={savingUid === user.uid}
                             >
-                              {ROLE_OPTIONS.map((opt) => (
+                              {roleOptions.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
                                   {opt.label}
                                 </option>
@@ -350,7 +503,7 @@ export default function TeamSettingsPage() {
                                     Cancelar
                                   </Button>
                                 </>
-                              ) : (
+                              ) : canManageTarget(currentRole) ? (
                                 <>
                                   <Button
                                     type="button"
@@ -360,6 +513,16 @@ export default function TeamSettingsPage() {
                                   >
                                     Editar
                                   </Button>
+                                  {user.email && (
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      className="px-2 py-1 text-xs"
+                                      onClick={() => resetMemberPassword(user.email!)}
+                                    >
+                                      Redefinir senha
+                                    </Button>
+                                  )}
                                   {user.uid !== profile?.uid && (
                                     <Button
                                       type="button"
@@ -372,6 +535,8 @@ export default function TeamSettingsPage() {
                                     </Button>
                                   )}
                                 </>
+                              ) : (
+                                <span className="text-xs text-app-muted">—</span>
                               )}
                             </div>
                           </td>

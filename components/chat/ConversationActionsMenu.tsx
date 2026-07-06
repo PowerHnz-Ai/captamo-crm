@@ -44,6 +44,7 @@ export function ConversationActionsMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [transferComment, setTransferComment] = useState("");
   const [menuCoords, setMenuCoords] = useState<MenuCoords | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -56,7 +57,10 @@ export function ConversationActionsMenu({
   function setMenuOpen(next: boolean) {
     setOpen(next);
     onOpenChange?.(next);
-    if (!next) setShowTransfer(false);
+    if (!next) {
+      setShowTransfer(false);
+      setTransferComment("");
+    }
   }
 
   function updateMenuPosition() {
@@ -86,8 +90,13 @@ export function ConversationActionsMenu({
       setMenuOpen(false);
     }
 
-    function handleScroll() {
-      setMenuOpen(false);
+    function handleScroll(e: Event) {
+      // Rolagem dentro do próprio menu (ex.: lista de transferência) não fecha.
+      if (e.target instanceof Node && menuRef.current?.contains(e.target)) {
+        return;
+      }
+      // Rolagem fora: segue o botão em vez de fechar.
+      updateMenuPosition();
     }
 
     function handleResize() {
@@ -241,15 +250,30 @@ export function ConversationActionsMenu({
       onMouseDown={(e) => e.stopPropagation()}
     >
       {showTransfer ? (
-        <div className="p-2">
+        <div className="w-64 p-2">
           <p className="mb-2 px-1 text-xs text-app-muted">Transferir para</p>
-          <div className="max-h-48 overflow-y-auto">
+          <textarea
+            value={transferComment}
+            onChange={(e) => setTransferComment(e.target.value)}
+            rows={2}
+            maxLength={1000}
+            placeholder="Comentário para o colega (opcional) — vira nota interna"
+            className="mb-2 w-full resize-none rounded-lg border border-app-border bg-transparent px-2 py-1.5 text-xs outline-none placeholder:text-app-muted"
+          />
+          <div className="max-h-48 overflow-y-auto overscroll-contain">
             {assigneeOptions.map((a) => (
               <button
                 key={a.uid}
                 type="button"
                 disabled={busy || a.uid === conversation.assignedTo}
-                onClick={() => void patch({ assignedTo: a.uid })}
+                onClick={() =>
+                  void patch({
+                    assignedTo: a.uid,
+                    ...(transferComment.trim()
+                      ? { transferComment: transferComment.trim() }
+                      : {}),
+                  })
+                }
                 className="flex w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5 disabled:opacity-40"
               >
                 {a.name}

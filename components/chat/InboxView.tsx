@@ -14,12 +14,67 @@ import { useResizablePanel } from "@/hooks/useResizablePanel";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
 import { mergeMessagesById } from "@/lib/message-merge";
 import { phonesMatch } from "@/lib/whatsapp/phone";
+import { useRealtimeInbox } from "@/hooks/useRealtimeInbox";
+import type { RealtimeEvent } from "@/lib/realtime";
 import type { InboxPeriodFilter } from "@/components/chat/InboxFilterPanel";
 import type { ConversationListItem, Message } from "@/lib/types";
 
 const POLL_MS = 5000;
+/** Com a aba oculta, só o contador barato continua — em ritmo mais lento. */
+const HIDDEN_POLL_MS = 30000;
+/** Com SSE conectado, o polling vira só rede de segurança. */
+const REALTIME_FALLBACK_POLL_MS = 60_000;
+const REALTIME_HIDDEN_POLL_MS = 300_000;
+/** Junta eventos SSE em rajada (ex.: campanha) num único reload. */
+const REALTIME_DEBOUNCE_MS = 400;
 const SEARCH_DEBOUNCE_MS = 350;
 const MESSAGE_PAGE_SIZE = 30;
+
+/** Beep curto via WebAudio — sem depender de asset de áudio. */
+function playNotificationSound() {
+  try {
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext })
+        .webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.4);
+    window.setTimeout(() => void ctx.close(), 600);
+  } catch {
+    // som é melhoria progressiva — falha silenciosa
+  }
+}
+
+function showDesktopNotification(count: number) {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  if (!document.hidden) return;
+  try {
+    const n = new Notification("Ultra API — nova mensagem", {
+      body:
+        count === 1
+          ? "Você tem 1 conversa não lida."
+          : `Você tem ${count} conversas não lidas.`,
+      tag: "ultra-inbox-unread",
+    });
+    n.onclick = () => {
+      window.focus();
+      n.close();
+    };
+  } catch {
+    // melhoria progressiva
+  }
+}
 
 interface InboxViewProps {
   basePath?: string;
@@ -73,6 +128,7 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [mineOnly, setMineOnly] = useState(false);
   const [tagFilter, setTagFilter] = useState("");
+  const [labelFilter, setLabelFilter] = useState("");
   const [windowFilter, setWindowFilter] = useState("");
   const [assigneeFilter, setAssigneeFilter] = useState("");
   const [periodFilter, setPeriodFilter] = useState<InboxPeriodFilter>("");
@@ -103,6 +159,28 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
   const hasLoadedListRef = useRef(false);
   const messageCacheRef = useRef<Map<string, Message[]>>(new Map());
   const paginationRef = useRef<Map<string, MessagePaginationState>>(new Map());
+  const prevTotalUnreadRef = useRef<number | null>(null);
+  const [pageVisible, setPageVisible] = useState(true);
+
+  // Pausa o polling pesado com a aba oculta; notificação assume o papel.
+  useEffect(() => {
+    const onVisibility = () => setPageVisible(!document.hidden);
+    onVisibility();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
+  // Pede permissão de notificação desktop uma vez (no primeiro clique).
+  useEffect(() => {
+    if (!canLoadInbox || typeof Notification === "undefined") return;
+    if (Notification.permission !== "default") return;
+    const request = () => {
+      void Notification.requestPermission();
+      window.removeEventListener("click", request);
+    };
+    window.addEventListener("click", request, { once: true });
+    return () => window.removeEventListener("click", request);
+  }, [canLoadInbox]);
 
   useEffect(() => {
     const timer = setTimeout(() => setSearchQuery(searchInput.trim()), SEARCH_DEBOUNCE_MS);
@@ -185,6 +263,7 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
     if (statusFilter) params.set("status", statusFilter);
     if (unreadOnly) params.set("unread", "true");
     if (tagFilter) params.set("tag", tagFilter);
+    if (labelFilter) params.set("label", labelFilter);
     if (windowFilter) params.set("window", windowFilter);
     if (periodFilter) params.set("period", periodFilter);
     if (noResponseOnly) params.set("noResponse", "true");
@@ -230,6 +309,7 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
     unreadOnly,
     mineOnly,
     tagFilter,
+    labelFilter,
     windowFilter,
     periodFilter,
     assigneeFilter,
@@ -286,10 +366,15 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
         }
 
         if (!monitorMode) {
-          void apiFetch(`/api/conversations/${id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ markRead: true }),
-          });
+          // markRead só ao abrir ou quando há não lidas — evita uma escrita
+          // no banco a cada ciclo de poll.
+          const hasUnread = (convData.conversation?.unreadCount ?? 0) > 0;
+          if (!silent || hasUnread) {
+            void apiFetch(`/api/conversations/${id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ markRead: true }),
+            });
+          }
 
           const msgRes = await apiFetch(
             `/api/conversations/${id}/messages?limit=${MESSAGE_PAGE_SIZE}`
@@ -449,37 +534,91 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
       .catch(() => setUnassignedCount(0));
   }, [canLoadInbox, monitorMode, activeConnectionId]);
 
+  const loadUnreadCounts = useCallback(async () => {
+    if (!canLoadInbox || connections.length === 0) return;
+    const defaultConnectionId =
+      connections.find((c) => c.isDefault)?.id || connections[0]?.id;
+
+    try {
+      const res = await apiFetch("/api/conversations/unread-counts");
+      const data = await parseApiJson<{
+        byConnection?: Record<string, number>;
+        unassignedConnection?: number;
+        total?: number;
+      }>(res);
+      if (!res.ok) return;
+
+      const counts: Record<string, number> = { ...(data.byConnection || {}) };
+      // Conversas sem conexão definida pertencem à conexão default.
+      if (data.unassignedConnection && defaultConnectionId) {
+        counts[defaultConnectionId] =
+          (counts[defaultConnectionId] || 0) + data.unassignedConnection;
+      }
+      setUnreadByConnection(counts);
+
+      // Notifica quando o total de não lidas aumenta.
+      const total = data.total || 0;
+      const prev = prevTotalUnreadRef.current;
+      prevTotalUnreadRef.current = total;
+      if (prev !== null && total > prev) {
+        playNotificationSound();
+        showDesktopNotification(total);
+      }
+    } catch {
+      // silencioso — próximo ciclo tenta de novo
+    }
+  }, [canLoadInbox, connections]);
+
+  // Tempo real (SSE): eventos disparam os loaders existentes com debounce;
+  // o polling continua como rede de segurança em ritmo lento.
+  const realtimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const realtimeTouchedActiveRef = useRef(false);
+
+  const handleRealtimeEvent = useCallback(
+    (event: RealtimeEvent) => {
+      if (event.conversationId === activeDetailIdRef.current) {
+        realtimeTouchedActiveRef.current = true;
+      }
+      if (realtimeTimerRef.current) return;
+      realtimeTimerRef.current = setTimeout(() => {
+        realtimeTimerRef.current = null;
+        const touchedActive = realtimeTouchedActiveRef.current;
+        realtimeTouchedActiveRef.current = false;
+        void loadConversations();
+        void loadUnreadCounts();
+        const currentActiveId = activeDetailIdRef.current;
+        if (touchedActive && currentActiveId) {
+          void loadConversationDetail(currentActiveId, { silent: true });
+        }
+      }, REALTIME_DEBOUNCE_MS);
+    },
+    [loadConversations, loadUnreadCounts, loadConversationDetail]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (realtimeTimerRef.current) clearTimeout(realtimeTimerRef.current);
+    };
+  }, []);
+
+  const { connected: realtimeConnected } = useRealtimeInbox({
+    enabled: canLoadInbox && !monitorMode,
+    onEvent: handleRealtimeEvent,
+  });
+
   useEffect(() => {
     if (!canLoadInbox || connections.length === 0) return;
-
-    async function loadUnreadCounts() {
-      const results = await Promise.all(
-        connections.map(async (c) => {
-          const params = new URLSearchParams();
-          params.set("connectionId", c.id);
-          params.set("unread", "true");
-          try {
-            const res = await apiFetch(`/api/conversations?${params}`);
-            const data = await parseApiJson<{
-              conversations?: ConversationListItem[];
-            }>(res);
-            const total = (data.conversations || []).reduce(
-              (sum, conv) => sum + (conv.unreadCount || 0),
-              0
-            );
-            return [c.id, total] as const;
-          } catch {
-            return [c.id, 0] as const;
-          }
-        })
-      );
-      setUnreadByConnection(Object.fromEntries(results));
-    }
-
     void loadUnreadCounts();
-    const timer = setInterval(() => void loadUnreadCounts(), POLL_MS);
+    const intervalMs = realtimeConnected
+      ? pageVisible
+        ? REALTIME_FALLBACK_POLL_MS
+        : REALTIME_HIDDEN_POLL_MS
+      : pageVisible
+        ? POLL_MS
+        : HIDDEN_POLL_MS;
+    const timer = setInterval(() => void loadUnreadCounts(), intervalMs);
     return () => clearInterval(timer);
-  }, [canLoadInbox, connections]);
+  }, [canLoadInbox, connections, pageVisible, realtimeConnected, loadUnreadCounts]);
 
   function handleConversationUpdated(updated: ConversationListItem) {
     setConversations((prev) =>
@@ -516,6 +655,10 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
 
   const tagOptions = [
     ...new Set(conversations.flatMap((c) => c.contactTags || [])),
+  ].sort();
+
+  const labelOptions = [
+    ...new Set(conversations.flatMap((c) => c.labels || [])),
   ].sort();
 
   useEffect(() => {
@@ -562,8 +705,18 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
     );
   }, [activeId, conversations]);
 
+  // Ao voltar para a aba, atualiza a lista imediatamente (dados ficaram velhos).
   useEffect(() => {
-    if (!canLoadInbox) return;
+    if (pageVisible && canLoadInbox && hasLoadedListRef.current) {
+      void loadConversations();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageVisible]);
+
+  useEffect(() => {
+    // Polling pesado (lista + detalhe) só com a aba visível; com SSE
+    // conectado vira apenas rede de segurança em ritmo lento.
+    if (!canLoadInbox || !pageVisible) return;
 
     const timer = setInterval(() => {
       void loadConversations().then((items) => {
@@ -578,9 +731,16 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
         }
         void loadConversationDetail(activeId, { silent: true });
       });
-    }, POLL_MS);
+    }, realtimeConnected ? REALTIME_FALLBACK_POLL_MS : POLL_MS);
     return () => clearInterval(timer);
-  }, [canLoadInbox, loadConversations, loadConversationDetail, activeId]);
+  }, [
+    canLoadInbox,
+    pageVisible,
+    realtimeConnected,
+    loadConversations,
+    loadConversationDetail,
+    activeId,
+  ]);
 
   function selectConversation(id: string) {
     activeDetailIdRef.current = id;
@@ -686,6 +846,9 @@ export function InboxView({ basePath = "/conversations" }: InboxViewProps) {
           tagFilter={tagFilter}
           onTagFilterChange={setTagFilter}
           tagOptions={tagOptions}
+          labelFilter={labelFilter}
+          onLabelFilterChange={setLabelFilter}
+          labelOptions={labelOptions}
           windowFilter={windowFilter}
           onWindowFilterChange={setWindowFilter}
           assigneeFilter={assigneeFilter}

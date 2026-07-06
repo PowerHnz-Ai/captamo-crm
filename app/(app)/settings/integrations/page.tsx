@@ -47,7 +47,7 @@ interface WebhookEventRow {
   status: string;
   error?: string;
   eventCount?: number;
-  createdAt?: { seconds?: number };
+  createdAt?: number;
 }
 
 export default function IntegrationsPage() {
@@ -150,8 +150,8 @@ export default function IntegrationsPage() {
   }
 
   function formatEventTime(row: WebhookEventRow) {
-    if (!row.createdAt?.seconds) return "—";
-    return new Date(row.createdAt.seconds * 1000).toLocaleString("pt-BR");
+    if (!row.createdAt) return "—";
+    return new Date(row.createdAt).toLocaleString("pt-BR");
   }
 
   if (loading) {

@@ -763,8 +763,7 @@ export function CampaignCreateModal({
     setStep(target);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function submitCampaign() {
     for (let s = 0; s <= 2; s++) {
       const error = validateWizardStep({
         ...validationInput,
@@ -927,7 +926,13 @@ export function CampaignCreateModal({
           />
         </div>
 
-        <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+        {/* Submissão nativa desativada: o botão Continuar vira "Criar" no último
+            passo e o React reaproveita o mesmo <button>, fazendo o clique da
+            transição disparar o submit antes do usuário ver o passo Envio. */}
+        <form
+          onSubmit={(e) => e.preventDefault()}
+          className="flex min-h-0 flex-1 flex-col"
+        >
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
             {step === 0 && (
               <CampaignSetupStep
@@ -1049,11 +1054,16 @@ export function CampaignCreateModal({
             </div>
             <div className="flex flex-wrap gap-2">
               {step < 3 ? (
-                <Button type="button" onClick={handleContinue}>
+                <Button key="continue" type="button" onClick={handleContinue}>
                   Continuar
                 </Button>
               ) : (
-                <Button type="submit" loading={creating}>
+                <Button
+                  key="create"
+                  type="button"
+                  loading={creating}
+                  onClick={() => void submitCampaign()}
+                >
                   {isEdit ? "Salvar alterações" : "Criar campanha"}
                 </Button>
               )}

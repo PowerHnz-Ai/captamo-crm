@@ -58,7 +58,7 @@ export function CampaignDispatchModeSection({
         ? Number(state.dailySendLimit)
         : undefined,
       scheduledEndAt: state.scheduledEndAt
-        ? ({ toMillis: () => new Date(state.scheduledEndAt).getTime() } as never)
+        ? new Date(state.scheduledEndAt).getTime()
         : undefined,
     });
   }, [totalContacts, state]);

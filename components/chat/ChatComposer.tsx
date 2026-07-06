@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { X, StickyNote, MessageSquare } from "lucide-react";
 import { AttachmentMenu } from "@/components/chat/AttachmentMenu";
 import { AudioRecordingBar } from "@/components/chat/AudioRecordingBar";
 import { ConnectionSwitcher, type ConnectionOption } from "@/components/chat/ConnectionSwitcher";
 import { QuickReplyPicker } from "@/components/chat/QuickReplyPicker";
 import { Switch } from "@/components/ui/Switch";
 import { useAudioRecorder } from "@/hooks/useAudioRecorder";
-import type { ConversationListItem } from "@/lib/types";
+import type { ConversationListItem, Message } from "@/lib/types";
 
 const INCLUDE_SENDER_NAME_KEY = "ultra-chat-include-sender-name";
 
@@ -32,6 +33,11 @@ interface ChatComposerProps {
     type: "image" | "audio" | "document";
     caption?: string;
   }, options?: SendMessageOptions) => Promise<void>;
+  /** Nota interna — habilita a aba "Nota" quando presente. */
+  onSendNote?: (body: string) => Promise<void>;
+  /** Mensagem sendo respondida (citação). */
+  replyingTo?: Message | null;
+  onCancelReply?: () => void;
 }
 
 function readIncludeSenderNamePreference(): boolean {
@@ -52,19 +58,34 @@ export function ChatComposer({
   contactPhone,
   onSendText,
   onSendMedia,
+  onSendNote,
+  replyingTo,
+  onCancelReply,
 }: ChatComposerProps) {
   const [body, setBody] = useState("");
   const [loading, setLoading] = useState(false);
   const [includeSenderName, setIncludeSenderName] = useState(false);
+  const [mode, setMode] = useState<"message" | "note">("message");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioRecorder = useAudioRecorder();
 
-  const slashQuery = body.startsWith("/") ? body.slice(1) : undefined;
+  const slashQuery =
+    mode === "message" && body.startsWith("/") ? body.slice(1) : undefined;
   const isRecordingUi = audioRecorder.isActive;
+  const noteMode = mode === "note";
+  // Nota interna funciona mesmo com a janela de 24h fechada.
+  const inputDisabled = noteMode ? loading : disabled || loading;
 
   useEffect(() => {
     setIncludeSenderName(readIncludeSenderNamePreference());
   }, []);
+
+  useEffect(() => {
+    if (replyingTo) {
+      setMode("message");
+      textareaRef.current?.focus();
+    }
+  }, [replyingTo]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -84,11 +105,17 @@ export function ChatComposer({
 
   async function submitText(text?: string) {
     const value = (text ?? body).trim();
-    if (!value || disabled || loading) return;
+    if (!value || inputDisabled) return;
     setLoading(true);
     try {
-      await onSendText(value, sendOptions);
+      if (noteMode && onSendNote) {
+        await onSendNote(value);
+      } else {
+        await onSendText(value, sendOptions);
+      }
       setBody("");
+    } catch {
+      // Falha já exibida via sendError; mantém o texto digitado no composer.
     } finally {
       setLoading(false);
     }
@@ -138,14 +165,48 @@ export function ChatComposer({
   }
 
   return (
-    <div className="chat-composer-shell rounded-2xl px-3 py-2">
+    <div
+      className={`chat-composer-shell rounded-2xl px-3 py-2 ${
+        noteMode ? "ring-1 ring-amber-500/40" : ""
+      }`}
+    >
       <div className="mb-2 flex min-w-0 items-center justify-between gap-2">
-        <ConnectionSwitcher
-          conversation={conversation}
-          onConversationUpdated={onConversationUpdated}
-          connections={connections}
-          placement="composer"
-        />
+        <div className="flex min-w-0 items-center gap-2">
+          {onSendNote && (
+            <div className="flex shrink-0 rounded-lg border border-app-border p-0.5">
+              <button
+                type="button"
+                onClick={() => setMode("message")}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors ${
+                  !noteMode
+                    ? "bg-app-accent text-white"
+                    : "text-app-muted hover:text-app-text"
+                }`}
+              >
+                <MessageSquare className="h-3 w-3" />
+                Mensagem
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("note")}
+                className={`flex items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-medium transition-colors ${
+                  noteMode
+                    ? "bg-amber-500/80 text-white"
+                    : "text-app-muted hover:text-app-text"
+                }`}
+              >
+                <StickyNote className="h-3 w-3" />
+                Nota
+              </button>
+            </div>
+          )}
+          <ConnectionSwitcher
+            conversation={conversation}
+            onConversationUpdated={onConversationUpdated}
+            connections={connections}
+            placement="composer"
+          />
+        </div>
         <Switch
           checked={includeSenderName}
           onChange={handleIncludeSenderNameChange}
@@ -155,7 +216,37 @@ export function ChatComposer({
         />
       </div>
 
-      {disabled && disabledReason && (
+      {replyingTo && !noteMode && (
+        <div className="mb-2 flex items-start justify-between gap-2 rounded-lg border-l-2 border-app-accent bg-app-secondary/40 px-3 py-1.5">
+          <div className="min-w-0">
+            <p className="text-[0.6875rem] font-medium text-app-accent">
+              Respondendo{" "}
+              {replyingTo.direction === "inbound"
+                ? contactName || "contato"
+                : replyingTo.sentByName || "você"}
+            </p>
+            <p className="truncate chat-text-meta text-app-subtle">
+              {replyingTo.body || replyingTo.media?.caption || `[${replyingTo.type}]`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onCancelReply}
+            className="shrink-0 rounded p-0.5 text-app-muted hover:text-app-text"
+            aria-label="Cancelar resposta"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {noteMode && (
+        <p className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 chat-text-meta text-amber-200">
+          Nota interna — visível só para a equipe, não é enviada ao contato.
+        </p>
+      )}
+
+      {disabled && !noteMode && disabledReason && (
         <p className="mb-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 chat-text-meta text-amber-200">
           {disabledReason}
         </p>
@@ -182,18 +273,22 @@ export function ChatComposer({
         {!isRecordingUi && (
           <>
             <div className="flex shrink-0 items-center">
-              <AttachmentMenu
-                disabled={disabled || loading}
-                onPickImage={handlePickImage}
-                onPickDocument={handlePickDocument}
-              />
-              <QuickReplyPicker
-                contactName={contactName}
-                contactPhone={contactPhone}
-                slashQuery={slashQuery}
-                onInsert={(text) => setBody(text)}
-                onSend={submitText}
-              />
+              {!noteMode && (
+                <>
+                  <AttachmentMenu
+                    disabled={inputDisabled}
+                    onPickImage={handlePickImage}
+                    onPickDocument={handlePickDocument}
+                  />
+                  <QuickReplyPicker
+                    contactName={contactName}
+                    contactPhone={contactPhone}
+                    slashQuery={slashQuery}
+                    onInsert={(text) => setBody(text)}
+                    onSend={submitText}
+                  />
+                </>
+              )}
             </div>
 
             <div className="min-w-0 flex-1">
@@ -202,10 +297,14 @@ export function ChatComposer({
                 value={body}
                 onChange={(e) => setBody(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={disabled || loading}
+                disabled={inputDisabled}
                 rows={1}
                 placeholder={
-                  disabled ? "Janela de atendimento fechada" : "Digite uma mensagem ou /atalho"
+                  noteMode
+                    ? "Escreva uma nota interna para a equipe"
+                    : disabled
+                      ? "Janela de atendimento fechada"
+                      : "Digite uma mensagem ou /atalho"
                 }
                 className="block max-h-[120px] min-h-[40px] w-full resize-none overflow-y-auto bg-transparent px-2 py-2 outline-none disabled:opacity-50"
                 style={{ fontSize: "var(--chat-text)" }}
@@ -215,13 +314,24 @@ export function ChatComposer({
         )}
 
         <div className="shrink-0">
-          <AudioRecordingBar
-            disabled={disabled || loading}
-            hasText={!isRecordingUi && Boolean(body.trim())}
-            recorder={audioRecorder}
-            onSendText={() => submitText()}
-            onSendAudio={handleSendAudio}
-          />
+          {noteMode ? (
+            <button
+              type="button"
+              disabled={inputDisabled || !body.trim()}
+              onClick={() => submitText()}
+              className="rounded-xl bg-amber-500/80 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-500 disabled:opacity-50"
+            >
+              Salvar nota
+            </button>
+          ) : (
+            <AudioRecordingBar
+              disabled={inputDisabled}
+              hasText={!isRecordingUi && Boolean(body.trim())}
+              recorder={audioRecorder}
+              onSendText={() => submitText()}
+              onSendAudio={handleSendAudio}
+            />
+          )}
         </div>
       </div>
 

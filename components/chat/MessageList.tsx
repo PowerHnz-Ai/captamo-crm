@@ -13,6 +13,8 @@ interface MessageListProps {
   retryingMessageId?: string | null;
   canDeleteForEveryone?: boolean;
   onDeleteForEveryone?: (message: Message) => void;
+  onReply?: (message: Message) => void;
+  onReact?: (message: Message, emoji: string) => void;
   hasMoreOlder?: boolean;
   loadingOlder?: boolean;
   onLoadOlder?: () => void;
@@ -48,6 +50,8 @@ export function MessageList({
   retryingMessageId,
   canDeleteForEveryone,
   onDeleteForEveryone,
+  onReply,
+  onReact,
   hasMoreOlder,
   loadingOlder,
   onLoadOlder,
@@ -106,6 +110,8 @@ export function MessageList({
                   showSenderLabel={showSenderLabel}
                   canDeleteForEveryone={canDeleteForEveryone}
                   onDeleteForEveryone={onDeleteForEveryone}
+                  onReply={onReply}
+                  onReact={onReact}
                 />
               );
             })}

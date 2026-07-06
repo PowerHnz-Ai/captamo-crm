@@ -231,7 +231,9 @@ export default function CampaignDetailPage() {
 
   const cadenceProgress = useMemo(() => {
     if (!campaign || campaign.dispatchMode !== "cadence") return null;
-    const pending = jobs.filter((j) => j.status === "pending");
+    const pending = jobs.filter(
+      (j) => j.status === "pending" || j.status === "processing"
+    );
     if (jobs.length === 0) return null;
     const done = jobs.length - pending.length;
     return Math.round((done / jobs.length) * 100);

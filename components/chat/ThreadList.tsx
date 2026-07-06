@@ -50,6 +50,9 @@ interface ThreadListProps {
   tagFilter?: string;
   onTagFilterChange?: (value: string) => void;
   tagOptions?: string[];
+  labelFilter?: string;
+  onLabelFilterChange?: (value: string) => void;
+  labelOptions?: string[];
   windowFilter?: string;
   onWindowFilterChange?: (value: string) => void;
   assigneeFilter?: string;
@@ -90,6 +93,9 @@ export function ThreadList({
   tagFilter = "",
   onTagFilterChange,
   tagOptions = [],
+  labelFilter = "",
+  onLabelFilterChange,
+  labelOptions = [],
   windowFilter = "",
   onWindowFilterChange,
   assigneeFilter = "",
@@ -118,6 +124,7 @@ export function ThreadList({
     windowFilter,
     periodFilter,
     tagFilter,
+    labelFilter,
     assigneeFilter,
     unreadOnly,
     mineOnly,
@@ -137,6 +144,9 @@ export function ThreadList({
     }
     if (patch.tagFilter !== undefined && onTagFilterChange) {
       onTagFilterChange(patch.tagFilter);
+    }
+    if (patch.labelFilter !== undefined && onLabelFilterChange) {
+      onLabelFilterChange(patch.labelFilter);
     }
     if (patch.assigneeFilter !== undefined && onAssigneeFilterChange) {
       onAssigneeFilterChange(patch.assigneeFilter);
@@ -192,6 +202,7 @@ export function ThreadList({
           onChange={handleFilterChange}
           activeCount={activeFilterCount}
           tagOptions={tagOptions}
+          labelOptions={labelOptions}
           assigneeOptions={assigneeOptions}
           showAssigneeFilter={showAssigneeFilter}
           showMineFilter={showMineFilter}
@@ -236,6 +247,7 @@ export function ThreadList({
             const avatar = contactAvatarColors(seed);
             const initials = contactInitials(conversation.contactName, conversation.phone);
             const tags = conversation.contactTags || [];
+            const labels = conversation.labels || [];
             const assigneeOption = assigneeOptions.find(
               (a) => a.uid === conversation.assignedTo
             );
@@ -244,6 +256,7 @@ export function ThreadList({
             const hasMeta =
               Boolean(conversation.assignedToName) ||
               tags.length > 0 ||
+              labels.length > 0 ||
               Boolean(conversation.phone) ||
               isClosed;
 
@@ -355,6 +368,14 @@ export function ThreadList({
                                   {conversation.phone}
                                 </span>
                               )}
+                              {labels.slice(0, 2).map((label) => (
+                                <span
+                                  key={`label-${label}`}
+                                  className="rounded-full bg-app-accent/15 px-1.5 py-px text-[0.625rem] font-medium leading-tight text-app-accent"
+                                >
+                                  {label}
+                                </span>
+                              ))}
                               {tags.slice(0, 2).map((tag) => (
                                 <span
                                   key={tag}

@@ -34,6 +34,8 @@ export interface UserProfile {
   /** @deprecated Legacy field — use role */
   cargo?: string;
   effectiveRole: UserRole;
+  /** Super-admin da plataforma (dono) — pode cadastrar clientes. */
+  platformAdmin: boolean;
 }
 
 interface AuthContextValue {
@@ -95,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           role: data.role,
           cargo: data.cargo,
           effectiveRole,
+          platformAdmin: data.platformAdmin === true,
         });
         // Sinaliza ao ThemeProvider para sincronizar preferências da conta.
         if (typeof window !== "undefined") {

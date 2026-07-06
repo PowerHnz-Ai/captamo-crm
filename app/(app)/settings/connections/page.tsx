@@ -57,6 +57,23 @@ export default function ConnectionsPage() {
   });
 
   const [qrConnection, setQrConnection] = useState<ConnectionRow | null>(null);
+  const [officialApi, setOfficialApi] = useState<{
+    configured: boolean;
+    phoneNumberId?: string;
+    tokenMasked: string;
+    configuredAt?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!canView) return;
+    apiFetch("/api/settings/whatsapp-status")
+      .then((r) =>
+        parseApiJson<{ status?: NonNullable<typeof officialApi> }>(r)
+      )
+      .then((data) => setOfficialApi(data.status ?? null))
+      .catch(() => setOfficialApi(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canView]);
 
   const load = useCallback(() => {
     apiFetch("/api/connections")
@@ -176,6 +193,31 @@ export default function ConnectionsPage() {
 
   return (
     <AppShell title="Conexões" subtitle="Números de WhatsApp conectados">
+      {officialApi && (
+        <div
+          className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+            officialApi.configured
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+              : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+          }`}
+        >
+          {officialApi.configured ? (
+            <p>
+              API oficial configurada pela equipe Ultra Hub
+              {officialApi.configuredAt
+                ? ` em ${new Date(officialApi.configuredAt).toLocaleDateString("pt-BR")}`
+                : ""}{" "}
+              — token {officialApi.tokenMasked}. Alterações são feitas pela equipe
+              Ultra Hub.
+            </p>
+          ) : (
+            <p>
+              WhatsApp ainda não configurado. O envio de mensagens está bloqueado
+              até a equipe Ultra Hub concluir a ativação da API desta conta.
+            </p>
+          )}
+        </div>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <p className="text-sm text-app-subtle">
           Adicione números via Evolution API lendo um QR code.

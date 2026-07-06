@@ -22,6 +22,12 @@ export function ExcelImport({ onImported }: ExcelImportProps) {
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState("");
+  const [progress, setProgress] = useState("");
+  const [invalidRows, setInvalidRows] = useState<
+    Array<{ row: number; name: string; phone: string; reason: string }>
+  >([]);
+
+  const CHUNK_SIZE = 500;
 
   const selectedOrigin = origins.find((o) => o.id === originId);
 
@@ -61,7 +67,7 @@ export function ExcelImport({ onImported }: ExcelImportProps) {
       if (json.length === 0) return;
       const cols = Object.keys(json[0]!);
       setColumns(cols);
-      setRows(json.slice(0, 200));
+      setRows(json);
       const autoMap: Record<string, string> = {};
       for (const field of targetFields) {
         const match = cols.find((c) =>
@@ -107,21 +113,52 @@ export function ExcelImport({ onImported }: ExcelImportProps) {
 
       if (contacts.length === 0) throw new Error("Nenhum contato válido na planilha.");
 
-      const res = await apiFetch("/api/contacts", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contacts }),
-      });
-      const data = await parseApiJson<{ created?: number; skipped?: number; error?: string }>(res);
-      if (!res.ok) throw new Error(data.error || "Erro na importação");
+      // Envia em lotes para não estourar o limite do request com planilhas grandes.
+      const totals = { created: 0, updated: 0, skipped: 0 };
+      const invalid: Array<{ row: number; name: string; phone: string; reason: string }> = [];
 
-      setResult(`${data.created ?? 0} criados, ${data.skipped ?? 0} ignorados.`);
+      for (let offset = 0; offset < contacts.length; offset += CHUNK_SIZE) {
+        const chunk = contacts.slice(offset, offset + CHUNK_SIZE);
+        setProgress(
+          `Importando ${Math.min(offset + chunk.length, contacts.length)} de ${contacts.length}...`
+        );
+
+        const res = await apiFetch("/api/contacts", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contacts: chunk }),
+        });
+        const data = await parseApiJson<{
+          created?: number;
+          updated?: number;
+          skipped?: number;
+          invalid?: Array<{ row: number; name: string; phone: string; reason: string }>;
+          error?: string;
+        }>(res);
+        if (!res.ok) throw new Error(data.error || "Erro na importação");
+
+        totals.created += data.created ?? 0;
+        totals.updated += data.updated ?? 0;
+        totals.skipped += data.skipped ?? 0;
+        for (const item of data.invalid ?? []) {
+          // Reindexa a linha para a posição na planilha original.
+          invalid.push({ ...item, row: item.row + offset });
+        }
+      }
+
+      const parts = [`${totals.created} criados`];
+      if (totals.updated) parts.push(`${totals.updated} atualizados`);
+      if (totals.skipped) parts.push(`${totals.skipped} ignorados (já existiam)`);
+      if (invalid.length) parts.push(`${invalid.length} inválidos`);
+      setResult(parts.join(", ") + ".");
+      setInvalidRows(invalid);
       setRows([]);
       setColumns([]);
       onImported();
     } catch (err) {
       setResult(err instanceof Error ? err.message : "Erro desconhecido");
     } finally {
+      setProgress("");
       setLoading(false);
     }
   }
@@ -243,7 +280,22 @@ export function ExcelImport({ onImported }: ExcelImportProps) {
         </div>
       )}
 
+      {progress && <p className="mb-2 text-sm text-app-accent">{progress}</p>}
       {result && <p className="mb-2 text-sm text-app-subtle">{result}</p>}
+      {invalidRows.length > 0 && (
+        <div className="mb-3 max-h-40 overflow-y-auto rounded-lg border border-amber-500/30 bg-amber-500/5 p-2">
+          <p className="mb-1 text-xs font-medium text-amber-300">
+            Linhas não importadas (telefone inválido):
+          </p>
+          <ul className="space-y-0.5 text-xs text-app-subtle">
+            {invalidRows.map((item) => (
+              <li key={`${item.row}-${item.phone}`}>
+                Linha {item.row}: {item.name || "(sem nome)"} — {item.phone} ({item.reason})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {rows.length > 0 && (
         <Button onClick={handleImport} loading={loading}>
           Importar {rows.length} contato(s)
