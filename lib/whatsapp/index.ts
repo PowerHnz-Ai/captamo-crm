@@ -21,12 +21,12 @@ export async function getWhatsAppProvider(
   connectionId?: string
 ): Promise<WhatsAppProvider> {
   if (connectionId) {
-    const { getConnection, connectionToWhatsAppConfig } = await import(
+    const { getConnection, resolveConnectionConfig } = await import(
       "../connections"
     );
     const connection = await getConnection(companyId, connectionId);
     if (connection) {
-      return createWhatsAppProvider(connectionToWhatsAppConfig(connection));
+      return createWhatsAppProvider(await resolveConnectionConfig(connection));
     }
   }
   const config = await getWhatsAppConfig(companyId);
@@ -35,6 +35,7 @@ export async function getWhatsAppProvider(
 
 export {
   WhatsAppProviderError,
+  WhatsAppNotConfiguredError,
   type NormalizedWebhookEvent,
   type WhatsAppConfig,
   type WhatsAppProvider,

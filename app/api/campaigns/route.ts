@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { Timestamp } from "firebase-admin/firestore";
 import { resolveCompanyContextOrError } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
 import { createCampaignSchema } from "@/lib/validators";
@@ -45,10 +44,10 @@ function buildAudienceConfig(
 
 function buildCampaignPayloadFields(parsed: ReturnType<typeof createCampaignSchema.parse>) {
   const scheduledAt = parsed.scheduledAt
-    ? Timestamp.fromDate(new Date(parsed.scheduledAt))
+    ? new Date(parsed.scheduledAt).getTime()
     : undefined;
   const scheduledEndAt = parsed.scheduledEndAt
-    ? Timestamp.fromDate(new Date(parsed.scheduledEndAt))
+    ? new Date(parsed.scheduledEndAt).getTime()
     : undefined;
   const audienceType = inferAudienceType(parsed);
   const audienceConfig = buildAudienceConfig(parsed);

@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { Timestamp } from "firebase-admin/firestore";
 import { resolveCompanyContextOrError } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
 import { updateCampaignSchema } from "@/lib/validators";
@@ -36,7 +35,7 @@ export async function POST(
 
     if (action === "start") {
       const now = Date.now();
-      if (campaign.scheduledAt && campaign.scheduledAt.toMillis() > now) {
+      if (campaign.scheduledAt && campaign.scheduledAt > now) {
         return NextResponse.json(
           { error: "Campanha agendada para o futuro." },
           { status: 400 }
@@ -245,14 +244,14 @@ export async function PATCH(
         ? undefined
         : data.scheduledAt === null
           ? null
-          : Timestamp.fromDate(new Date(data.scheduledAt));
+          : new Date(data.scheduledAt).getTime();
 
     const scheduledEndAt =
       data.scheduledEndAt === undefined
         ? undefined
         : data.scheduledEndAt === null
           ? null
-          : Timestamp.fromDate(new Date(data.scheduledEndAt));
+          : new Date(data.scheduledEndAt).getTime();
 
     const dispatchChanged =
       data.dispatchMode !== undefined ||

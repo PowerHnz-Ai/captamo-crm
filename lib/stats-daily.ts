@@ -1,5 +1,5 @@
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { getSql } from "./db";
+import type { DateMillis } from "./types";
 
 export interface DailyStats {
   id: string;
@@ -13,8 +13,18 @@ export interface DailyStats {
   messagesFailed: number;
   optOuts: number;
   uniqueRecipients24h: number;
-  updatedAt: Timestamp;
+  updatedAt: DateMillis;
 }
+
+type DailyStatsCounter =
+  | "templatesSent"
+  | "messagesSent"
+  | "messagesReceived"
+  | "messagesDelivered"
+  | "messagesRead"
+  | "messagesFailed"
+  | "optOuts"
+  | "uniqueRecipients24h";
 
 function todayKey(): string {
   return new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -26,64 +36,88 @@ function docId(companyId: string, date?: string) {
 
 export async function incrementDailyStats(
   companyId: string,
-  delta: Partial<
-    Record<
-      | "templatesSent"
-      | "messagesSent"
-      | "messagesReceived"
-      | "messagesDelivered"
-      | "messagesRead"
-      | "messagesFailed"
-      | "optOuts"
-      | "uniqueRecipients24h",
-      number
-    >
-  >
+  delta: Partial<Record<DailyStatsCounter, number>>
 ): Promise<void> {
-  const ref = getDb().collection("stats_daily").doc(docId(companyId));
-  const update: Record<string, unknown> = {
-    companyId,
-    date: todayKey(),
-    updatedAt: Timestamp.now(),
-  };
+  const date = todayKey();
+  const increments: Partial<Record<DailyStatsCounter, { increment: number }>> = {};
+  const initial: Partial<Record<DailyStatsCounter, number>> = {};
 
-  for (const [key, value] of Object.entries(delta)) {
+  for (const [key, value] of Object.entries(delta) as Array<
+    [DailyStatsCounter, number]
+  >) {
     if (value && value > 0) {
-      update[key] = FieldValue.increment(value);
+      increments[key] = { increment: value };
+      initial[key] = value;
     }
   }
 
-  await ref.set(update, { merge: true });
+  await getSql().dailyStats.upsert({
+    where: { companyId_date: { companyId, date } },
+    create: {
+      id: docId(companyId, date),
+      companyId,
+      date,
+      ...initial,
+    },
+    update: increments,
+  });
 }
 
 export async function getDailyStats(
   companyId: string,
   date?: string
 ): Promise<DailyStats | null> {
-  const doc = await getDb()
-    .collection("stats_daily")
-    .doc(docId(companyId, date))
-    .get();
-  if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() } as DailyStats;
+  const row = await getSql().dailyStats.findUnique({
+    where: { companyId_date: { companyId, date: date || todayKey() } },
+  });
+  if (!row) return null;
+  return {
+    id: row.id,
+    companyId: row.companyId,
+    date: row.date,
+    templatesSent: row.templatesSent,
+    messagesSent: row.messagesSent,
+    messagesReceived: row.messagesReceived,
+    messagesDelivered: row.messagesDelivered,
+    messagesRead: row.messagesRead,
+    messagesFailed: row.messagesFailed,
+    optOuts: row.optOuts,
+    uniqueRecipients24h: row.uniqueRecipients24h,
+    updatedAt: row.updatedAt.getTime(),
+  };
 }
 
 export async function getStatsRange(
   companyId: string,
   days: number
 ): Promise<DailyStats[]> {
-  const results: DailyStats[] = [];
+  const keys: string[] = [];
   const now = new Date();
-
   for (let i = 0; i < days; i++) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10).replace(/-/g, "");
-    const stats = await getDailyStats(companyId, key);
-    if (stats) results.push(stats);
+    keys.push(d.toISOString().slice(0, 10).replace(/-/g, ""));
   }
 
-  return results.reverse();
+  const rows = await getSql().dailyStats.findMany({
+    where: { companyId, date: { in: keys } },
+    orderBy: { date: "asc" },
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    companyId: row.companyId,
+    date: row.date,
+    templatesSent: row.templatesSent,
+    messagesSent: row.messagesSent,
+    messagesReceived: row.messagesReceived,
+    messagesDelivered: row.messagesDelivered,
+    messagesRead: row.messagesRead,
+    messagesFailed: row.messagesFailed,
+    optOuts: row.optOuts,
+    uniqueRecipients24h: row.uniqueRecipients24h,
+    updatedAt: row.updatedAt.getTime(),
+  }));
 }
 
 export async function aggregateStatsRange(

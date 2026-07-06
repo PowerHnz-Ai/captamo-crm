@@ -1,10 +1,13 @@
-import { FieldValue, FieldPath, Timestamp } from "firebase-admin/firestore";
-import type {
-  CollectionReference,
-  Query,
-  QueryDocumentSnapshot,
-} from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { Prisma } from "@prisma/client";
+import { getSql } from "./db";
+import {
+  contactFromRow,
+  contactListFromRow,
+  conversationFromRow,
+  messageFromRow,
+  templateFromRow,
+  safeNormalizePhone,
+} from "./db-mappers";
 import type {
   Contact,
   ContactList,
@@ -16,7 +19,7 @@ import type {
   Template,
 } from "./types";
 import { isWithinConversationWindow } from "./conversation-window";
-import { normalizePhone, phonesMatch } from "./whatsapp/phone";
+import { normalizePhone } from "./whatsapp/phone";
 
 export interface CompanyScope {
   companyId: string;
@@ -29,50 +32,42 @@ export function isOptOutMessage(text: string): boolean {
   return OPT_OUT_KEYWORDS.includes(normalized);
 }
 
-function nowTimestamp() {
-  return Timestamp.now();
+/** JSON opcional para escrita no Prisma (undefined = não altera a coluna). */
+function j(value: unknown): Prisma.InputJsonValue | undefined {
+  return value === undefined || value === null
+    ? undefined
+    : (value as Prisma.InputJsonValue);
 }
 
 export async function ensureDefaultTemplate(): Promise<void> {
-  const ref = getDb().collection("templates").doc("confirmacao_agendamento");
-  const snap = await ref.get();
-  if (snap.exists) return;
+  const sql = getSql();
+  const existing = await sql.template.findUnique({
+    where: { id: "confirmacao_agendamento" },
+    select: { id: true },
+  });
+  if (existing) return;
 
-  const ts = nowTimestamp();
-  await ref.set({
-    id: "confirmacao_agendamento",
-    name: "confirmacao_agendamento",
-    language: "pt_BR",
-    category: "utility",
-    status: "approved",
-    body: "Olá, {{1}}! Sua consulta na Mister Odonto está confirmada para {{2}} às {{3}}. Qualquer dúvida, responda esta mensagem.",
-    createdAt: ts,
-    updatedAt: ts,
-  } satisfies Omit<Template, "id"> & { id: string });
+  await sql.template.create({
+    data: {
+      id: "confirmacao_agendamento",
+      name: "confirmacao_agendamento",
+      language: "pt_BR",
+      category: "utility",
+      status: "approved",
+      body: "Olá, {{1}}! Sua consulta na Mister Odonto está confirmada para {{2}} às {{3}}. Qualquer dúvida, responda esta mensagem.",
+    },
+  });
 }
 
 export async function findContactByPhone(
   phone: string,
   scope: CompanyScope
 ): Promise<Contact | null> {
-  let target: string;
-  try {
-    target = normalizePhone(phone);
-  } catch {
-    target = phone.replace(/[\s+\-()]/g, "");
-  }
-
-  const snap = await getDb()
-    .collection("contacts")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  const match = snap.docs.find((doc) => {
-    const stored = (doc.data() as Contact).phone;
-    return phonesMatch(stored, target);
+  const target = safeNormalizePhone(phone);
+  const row = await getSql().contact.findFirst({
+    where: { companyId: scope.companyId, phoneNormalized: target },
   });
-  if (!match) return null;
-  return { id: match.id, ...match.data() } as Contact;
+  return row ? contactFromRow(row) : null;
 }
 
 export async function createOrGetContactByPhone(
@@ -80,6 +75,7 @@ export async function createOrGetContactByPhone(
   scope: CompanyScope,
   data?: Partial<Pick<Contact, "name" | "source" | "tags" | "optIn">>
 ): Promise<Contact> {
+  const sql = getSql();
   const existing = await findContactByPhone(phone, scope);
   if (existing) {
     let normalizedPhone: string | undefined;
@@ -89,54 +85,52 @@ export async function createOrGetContactByPhone(
       normalizedPhone = undefined;
     }
 
-    const updates: Partial<Pick<Contact, "name" | "source">> = {};
+    const updates: Prisma.ContactUpdateInput = {};
+    let changed = false;
     if (data?.name && data.name !== existing.name) {
       updates.name = data.name;
-      updates.source = data.source;
+      if (data.source !== undefined) updates.source = data.source;
+      changed = true;
     }
     if (normalizedPhone && normalizedPhone !== existing.phone) {
-      await getDb().collection("contacts").doc(existing.id).update({
-        phone: normalizedPhone,
-        ...updates,
-        updatedAt: nowTimestamp(),
-      });
-      return {
-        ...existing,
-        phone: normalizedPhone,
-        ...updates,
-      };
+      updates.phone = normalizedPhone;
+      updates.phoneNormalized = normalizedPhone;
+      changed = true;
     }
-    if (updates.name) {
-      await updateContact(existing.id, updates);
-      return { ...existing, ...updates };
+    if (changed) {
+      const row = await sql.contact.update({
+        where: { id: existing.id },
+        data: updates,
+      });
+      return contactFromRow(row);
     }
     return existing;
   }
 
-  let storedPhone = phone;
-  try {
-    storedPhone = normalizePhone(phone);
-  } catch {
-    storedPhone = phone.replace(/[\s+\-()]/g, "");
-  }
-
-  const ts = nowTimestamp();
-  const ref = getDb().collection("contacts").doc();
-  const contact: Omit<Contact, "id"> = {
-    name: data?.name || storedPhone,
-    phone: storedPhone,
-    source: data?.source || "whatsapp",
-    tags: data?.tags || [],
-    optIn: data?.optIn ?? true,
-    blocked: false,
-    archived: false,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-
-  await ref.set({ id: ref.id, ...contact });
-  return { id: ref.id, ...contact };
+  // Upsert na chave composta: dois webhooks simultâneos do mesmo número novo
+  // não criam duplicado (o segundo só lê a linha já criada).
+  const storedPhone = safeNormalizePhone(phone);
+  const row = await sql.contact.upsert({
+    where: {
+      companyId_phoneNormalized: {
+        companyId: scope.companyId,
+        phoneNormalized: storedPhone,
+      },
+    },
+    create: {
+      name: data?.name || storedPhone,
+      phone: storedPhone,
+      phoneNormalized: storedPhone,
+      source: data?.source || "whatsapp",
+      tags: (data?.tags || []) as Prisma.InputJsonValue,
+      optIn: data?.optIn ?? true,
+      blocked: false,
+      archived: false,
+      companyId: scope.companyId,
+    },
+    update: {},
+  });
+  return contactFromRow(row);
 }
 
 export async function updateContact(
@@ -159,31 +153,48 @@ export async function updateContact(
     >
   >
 ): Promise<void> {
-  await getDb()
-    .collection("contacts")
-    .doc(id)
-    .update({ ...data, updatedAt: nowTimestamp() });
+  const patch: Prisma.ContactUpdateInput = {};
+  if (data.name !== undefined) patch.name = data.name;
+  if (data.phone !== undefined) {
+    patch.phone = data.phone;
+    patch.phoneNormalized = safeNormalizePhone(data.phone);
+  }
+  if (data.source !== undefined) patch.source = data.source;
+  if (data.tags !== undefined) patch.tags = data.tags as Prisma.InputJsonValue;
+  if (data.optIn !== undefined) patch.optIn = data.optIn;
+  if (data.blocked !== undefined) patch.blocked = data.blocked;
+  if (data.archived !== undefined) patch.archived = data.archived;
+  if (data.notes !== undefined) patch.notes = data.notes;
+  if (data.customFields !== undefined) {
+    patch.customFields = data.customFields as Prisma.InputJsonValue;
+  }
+  if (data.originId !== undefined) patch.originId = data.originId;
+  if (data.originFields !== undefined) {
+    patch.originFields = data.originFields as Prisma.InputJsonValue;
+  }
+  if (data.leadClass !== undefined) patch.leadClass = data.leadClass;
+
+  await getSql().contact.update({ where: { id }, data: patch });
 }
 
 export async function deleteContact(
   id: string,
   scope: CompanyScope
 ): Promise<boolean> {
-  const contact = await getContactById(id, scope);
-  if (!contact) return false;
-  await getDb().collection("contacts").doc(id).delete();
-  return true;
+  const result = await getSql().contact.deleteMany({
+    where: { id, companyId: scope.companyId },
+  });
+  return result.count > 0;
 }
 
 export async function getContactById(
   id: string,
   scope: CompanyScope
 ): Promise<Contact | null> {
-  const doc = await getDb().collection("contacts").doc(id).get();
-  if (!doc.exists) return null;
-  const contact = { id: doc.id, ...doc.data() } as Contact;
-  if (contact.companyId !== scope.companyId) return null;
-  return contact;
+  const row = await getSql().contact.findFirst({
+    where: { id, companyId: scope.companyId },
+  });
+  return row ? contactFromRow(row) : null;
 }
 
 export async function blockContactByPhone(
@@ -203,46 +214,102 @@ export async function isContactBlocked(
   return contact?.blocked === true;
 }
 
+export interface ContactListFilters {
+  tag?: string;
+  search?: string;
+  archived?: boolean;
+  originId?: string;
+}
+
+/** WHERE único de contatos — tag e busca resolvidas no banco (indexado). */
+function contactsWhere(
+  scope: CompanyScope,
+  filters?: ContactListFilters
+): Prisma.ContactWhereInput {
+  const search = filters?.search?.trim();
+  const digits = search ? search.replace(/\D/g, "") : "";
+  return {
+    companyId: scope.companyId,
+    ...(filters?.archived !== undefined ? { archived: filters.archived } : {}),
+    ...(filters?.originId ? { originId: filters.originId } : {}),
+    ...(filters?.tag ? { tags: { array_contains: filters.tag } } : {}),
+    ...(search
+      ? {
+          OR: [
+            { name: { contains: search } },
+            ...(digits.length >= 3
+              ? [{ phoneNormalized: { contains: digits } }]
+              : []),
+          ],
+        }
+      : {}),
+  };
+}
+
 export async function listContacts(
   scope: CompanyScope,
-  filters?: { tag?: string; search?: string; archived?: boolean; originId?: string }
+  filters?: ContactListFilters
 ): Promise<Contact[]> {
-  const snap = await getDb()
-    .collection("contacts")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  let contacts = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Contact);
-
-  if (filters?.archived !== undefined) {
-    contacts = contacts.filter((c) => Boolean(c.archived) === filters.archived);
-  }
-
-  contacts.sort((a, b) => {
-    const aMs = a.createdAt?.toMillis?.() ?? 0;
-    const bMs = b.createdAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
+  const rows = await getSql().contact.findMany({
+    where: contactsWhere(scope, filters),
+    orderBy: { createdAt: "desc" },
   });
+  return rows.map(contactFromRow);
+}
 
-  if (filters?.tag) {
-    contacts = contacts.filter((c) => c.tags?.includes(filters.tag!));
+export async function listContactsPage(
+  scope: CompanyScope,
+  filters: ContactListFilters,
+  page: { limit: number; offset: number }
+): Promise<{ contacts: Contact[]; total: number }> {
+  const where = contactsWhere(scope, filters);
+  const sql = getSql();
+  const [rows, total] = await Promise.all([
+    sql.contact.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: page.limit,
+      skip: page.offset,
+    }),
+    sql.contact.count({ where }),
+  ]);
+  return { contacts: rows.map(contactFromRow), total };
+}
+
+/** Contadores por origem + universo de tags (tabs e filtros da tela de contatos). */
+export async function getContactsAggregates(scope: CompanyScope): Promise<{
+  countsByOrigin: Record<string, number>;
+  total: number;
+  tags: string[];
+}> {
+  const sql = getSql();
+  const [grouped, total, tagRows] = await Promise.all([
+    sql.contact.groupBy({
+      by: ["originId"],
+      where: { companyId: scope.companyId },
+      _count: { _all: true },
+    }),
+    sql.contact.count({ where: { companyId: scope.companyId } }),
+    sql.contact.findMany({
+      where: { companyId: scope.companyId },
+      select: { tags: true },
+    }),
+  ]);
+
+  const countsByOrigin: Record<string, number> = {};
+  for (const group of grouped) {
+    if (group.originId) countsByOrigin[group.originId] = group._count._all;
   }
 
-  if (filters?.search) {
-    const q = filters.search.toLowerCase();
-    contacts = contacts.filter(
-      (c) =>
-        c.name.toLowerCase().includes(q) ||
-        c.phone.includes(q) ||
-        c.tags?.some((t) => t.toLowerCase().includes(q))
-    );
+  const tags = new Set<string>();
+  for (const row of tagRows) {
+    if (!Array.isArray(row.tags)) continue;
+    for (const tag of row.tags) {
+      if (typeof tag === "string" && tag) tags.add(tag);
+    }
   }
 
-  if (filters?.originId) {
-    contacts = contacts.filter((c) => c.originId === filters.originId);
-  }
-
-  return contacts;
+  return { countsByOrigin, total, tags: [...tags].sort() };
 }
 
 export async function importContacts(
@@ -260,47 +327,67 @@ export async function importContacts(
   let skipped = 0;
   let updated = 0;
 
+  async function applyDuplicatePolicy(
+    existing: Contact,
+    row: (typeof rows)[number]
+  ): Promise<void> {
+    if (policy === "skip") {
+      skipped++;
+      return;
+    }
+
+    const mergedTags = [...new Set([...(existing.tags || []), ...(row.tags || [])])];
+    const patch: Partial<
+      Pick<Contact, "name" | "tags" | "customFields" | "originId" | "originFields" | "leadClass">
+    > = {
+      tags: mergedTags,
+    };
+
+    if (policy === "update") {
+      if (row.name) patch.name = row.name;
+      if (row.customFields) {
+        patch.customFields = { ...(existing.customFields || {}), ...row.customFields };
+      }
+      if (row.originId) patch.originId = row.originId;
+      if (row.originFields) {
+        patch.originFields = { ...(existing.originFields || {}), ...row.originFields };
+      }
+    } else if (policy === "tag_existing") {
+      if (row.customFields) {
+        patch.customFields = { ...(existing.customFields || {}), ...row.customFields };
+      }
+      if (row.originId) patch.originId = row.originId;
+      if (row.originFields) {
+        patch.originFields = { ...(existing.originFields || {}), ...row.originFields };
+      }
+    }
+
+    await updateContact(existing.id, patch);
+    updated++;
+  }
+
   for (const row of rows) {
     const existing = await findContactByPhone(row.phone, scope);
     if (existing) {
-      if (policy === "skip") {
-        skipped++;
-        continue;
-      }
-
-      const mergedTags = [...new Set([...(existing.tags || []), ...(row.tags || [])])];
-      const patch: Partial<
-        Pick<Contact, "name" | "tags" | "customFields" | "originId" | "originFields" | "leadClass">
-      > = {
-        tags: mergedTags,
-      };
-
-      if (policy === "update") {
-        if (row.name) patch.name = row.name;
-        if (row.customFields) {
-          patch.customFields = { ...(existing.customFields || {}), ...row.customFields };
-        }
-        if (row.originId) patch.originId = row.originId;
-        if (row.originFields) {
-          patch.originFields = { ...(existing.originFields || {}), ...row.originFields };
-        }
-      } else if (policy === "tag_existing") {
-        if (row.customFields) {
-          patch.customFields = { ...(existing.customFields || {}), ...row.customFields };
-        }
-        if (row.originId) patch.originId = row.originId;
-        if (row.originFields) {
-          patch.originFields = { ...(existing.originFields || {}), ...row.originFields };
-        }
-      }
-
-      await updateContact(existing.id, patch);
-      updated++;
+      await applyDuplicatePolicy(existing, row);
       continue;
     }
 
-    await createContactManual(row, scope);
-    created++;
+    try {
+      await createContactManual(row, scope);
+      created++;
+    } catch (error) {
+      // Corrida com webhook/outro import: o telefone surgiu entre o find e o
+      // create — recarrega e aplica a política de duplicado normalmente.
+      const message = error instanceof Error ? error.message : "";
+      if (!message.includes("Já existe")) throw error;
+      const raced = await findContactByPhone(row.phone, scope);
+      if (raced) {
+        await applyDuplicatePolicy(raced, row);
+      } else {
+        skipped++;
+      }
+    }
   }
 
   return { created, skipped, updated };
@@ -319,45 +406,55 @@ export async function createContactManual(
     throw new Error("Já existe um contato com este telefone.");
   }
 
-  const ts = nowTimestamp();
-  const ref = getDb().collection("contacts").doc();
-  const contact: Omit<Contact, "id"> = {
-    ...data,
-    phone: normalizedPhone,
-    blocked: false,
-    archived: false,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...contact });
-  return { id: ref.id, ...contact };
+  try {
+    const row = await getSql().contact.create({
+      data: {
+        name: data.name,
+        phone: normalizedPhone,
+        phoneNormalized: normalizedPhone,
+        source: data.source,
+        tags: (data.tags || []) as Prisma.InputJsonValue,
+        optIn: data.optIn,
+        notes: data.notes,
+        customFields: j(data.customFields),
+        originId: data.originId,
+        originFields: j(data.originFields),
+        leadClass: data.leadClass ?? undefined,
+        blocked: false,
+        archived: false,
+        companyId: scope.companyId,
+      },
+    });
+    return contactFromRow(row);
+  } catch (error) {
+    // Corrida: outro request criou o mesmo telefone entre o find e o create.
+    if (isUniqueConstraintError(error)) {
+      throw new Error("Já existe um contato com este telefone.");
+    }
+    throw error;
+  }
+}
+
+/** Violação de índice único (P2002) do Prisma. */
+function isUniqueConstraintError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: string }).code === "P2002"
+  );
 }
 
 export async function findConversationByPhone(
   phone: string,
   scope: CompanyScope
 ): Promise<Conversation | null> {
-  const snap = await getDb()
-    .collection("conversations")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  const matches = snap.docs.filter((doc) => {
-    const stored = (doc.data() as Conversation).phone;
-    return phonesMatch(stored, phone);
+  const target = safeNormalizePhone(phone);
+  const row = await getSql().conversation.findFirst({
+    where: { companyId: scope.companyId, phoneNormalized: target },
+    orderBy: { lastMessageAt: "desc" },
   });
-
-  if (matches.length === 0) return null;
-
-  matches.sort((a, b) => {
-    const aMs = (a.data() as Conversation).lastMessageAt?.toMillis?.() ?? 0;
-    const bMs = (b.data() as Conversation).lastMessageAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
-  });
-
-  const match = matches[0];
-  return { id: match.id, ...match.data() } as Conversation;
+  return row ? conversationFromRow(row) : null;
 }
 
 export async function createOrGetConversationByPhone(
@@ -365,143 +462,55 @@ export async function createOrGetConversationByPhone(
   contactId: string,
   scope: CompanyScope
 ): Promise<Conversation> {
+  const sql = getSql();
+  const storedPhone = safeNormalizePhone(phone);
   const existing = await findConversationByPhone(phone, scope);
   if (existing) {
-    let storedPhone: string;
-    try {
-      storedPhone = normalizePhone(phone);
-    } catch {
-      storedPhone = phone.replace(/[\s+\-()]/g, "");
-    }
-
     if (storedPhone !== existing.phone || existing.contactId !== contactId) {
-      await getDb().collection("conversations").doc(existing.id).update({
-        phone: storedPhone,
-        contactId,
-        updatedAt: nowTimestamp(),
+      await sql.conversation.update({
+        where: { id: existing.id },
+        data: { phone: storedPhone, phoneNormalized: storedPhone, contactId },
       });
       return { ...existing, phone: storedPhone, contactId };
     }
     return existing;
   }
 
-  let storedPhone = phone;
-  try {
-    storedPhone = normalizePhone(phone);
-  } catch {
-    storedPhone = phone.replace(/[\s+\-()]/g, "");
-  }
-
-  const ts = nowTimestamp();
-  const ref = getDb().collection("conversations").doc();
-  const conversation: Omit<Conversation, "id"> = {
-    contactId,
-    phone: storedPhone,
-    status: "open",
-    lastMessageAt: ts,
-    unreadCount: 0,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-
-  await ref.set({ id: ref.id, ...conversation });
-  return { id: ref.id, ...conversation };
+  const row = await sql.conversation.create({
+    data: {
+      contactId,
+      phone: storedPhone,
+      phoneNormalized: storedPhone,
+      status: "open",
+      lastMessageAt: new Date(),
+      unreadCount: 0,
+      companyId: scope.companyId,
+    },
+  });
+  return conversationFromRow(row);
 }
 
 export async function getConversationById(
   id: string,
   scope: CompanyScope
 ): Promise<Conversation | null> {
-  const doc = await getDb().collection("conversations").doc(id).get();
-  if (!doc.exists) return null;
-  const conversation = { id: doc.id, ...doc.data() } as Conversation;
-  if (conversation.companyId !== scope.companyId) return null;
-  return conversation;
-}
-
-function sanitizeWhatsAppMessageRefId(id?: string): string | null {
-  if (!id || typeof id !== "string") return null;
-  const trimmed = id.trim();
-  if (!trimmed) return null;
-  if (trimmed.includes("/")) return null;
-  if (trimmed === "." || trimmed === "..") return null;
-  if (trimmed.length > 1500) return null;
-  if (/^__.*__$/.test(trimmed)) return null;
-  if (/[\x00-\x1f\x7f]/.test(trimmed)) return null;
-  return trimmed;
-}
-
-async function collectConversationWhatsAppRefIds(
-  messagesRef: CollectionReference
-): Promise<Set<string>> {
-  const refIds = new Set<string>();
-  let lastDoc: QueryDocumentSnapshot | undefined;
-
-  while (true) {
-    let query = messagesRef.orderBy(FieldPath.documentId()).limit(500);
-    if (lastDoc) {
-      query = query.startAfter(lastDoc);
-    }
-
-    const snap = await query.get();
-    if (snap.empty) break;
-
-    for (const doc of snap.docs) {
-      const refId = sanitizeWhatsAppMessageRefId(
-        (doc.data() as Message).whatsappMessageId
-      );
-      if (refId) refIds.add(refId);
-    }
-
-    lastDoc = snap.docs[snap.docs.length - 1];
-    if (snap.size < 500) break;
-  }
-
-  return refIds;
-}
-
-async function deleteWhatsAppMessageRefs(refIds: Iterable<string>): Promise<void> {
-  const db = getDb();
-  const bulkWriter = db.bulkWriter();
-  bulkWriter.onWriteError((error) => {
-    if (error.code === 5) return false;
-    return error.failedAttempts < 3;
+  const row = await getSql().conversation.findFirst({
+    where: { id, companyId: scope.companyId },
   });
-
-  for (const refId of refIds) {
-    try {
-      bulkWriter.delete(db.collection("whatsapp_message_refs").doc(refId));
-    } catch (error) {
-      console.warn(
-        "[deleteConversation] Ref WhatsApp ignorada:",
-        refId.slice(0, 40),
-        error
-      );
-    }
-  }
-
-  await bulkWriter.close();
+  return row ? conversationFromRow(row) : null;
 }
 
 export async function deleteConversation(
   id: string,
   scope: CompanyScope
 ): Promise<boolean> {
+  const sql = getSql();
   const conversation = await getConversationById(id, scope);
   if (!conversation) return false;
 
-  const db = getDb();
-  const messagesRef = db
-    .collection("conversations")
-    .doc(id)
-    .collection("messages");
-
-  const refIds = await collectConversationWhatsAppRefIds(messagesRef);
-
-  await db.recursiveDelete(messagesRef);
-  await deleteWhatsAppMessageRefs(refIds);
-  await db.collection("conversations").doc(id).delete();
+  // Mensagens caem por cascade; refs de WhatsApp são limpas por conversationId.
+  await sql.whatsAppMessageRef.deleteMany({ where: { conversationId: id } });
+  await sql.conversation.delete({ where: { id } });
 
   return true;
 }
@@ -511,25 +520,21 @@ export async function updateConversationLastMessage(
   preview: string,
   inbound = false
 ): Promise<void> {
-  const update: Record<string, unknown> = {
-    lastMessageAt: nowTimestamp(),
-    lastMessagePreview: preview,
-    updatedAt: nowTimestamp(),
-  };
-
-  if (inbound) {
-    update.lastInboundAt = nowTimestamp();
-    update.unreadCount = FieldValue.increment(1);
-  }
-
-  if (inbound) {
-    const doc = await getDb().collection("conversations").doc(conversationId).get();
-    if (doc.exists && doc.data()?.status === "closed") {
-      update.status = "open";
-    }
-  }
-
-  await getDb().collection("conversations").doc(conversationId).update(update);
+  const now = new Date();
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: {
+      lastMessageAt: now,
+      lastMessagePreview: preview,
+      ...(inbound
+        ? {
+            lastInboundAt: now,
+            unreadCount: { increment: 1 },
+            status: "open",
+          }
+        : {}),
+    },
+  });
 }
 
 export async function updateConversationStatus(
@@ -537,14 +542,13 @@ export async function updateConversationStatus(
   status: Conversation["status"],
   options?: { markRead?: boolean }
 ): Promise<void> {
-  const update: Record<string, unknown> = {
-    status,
-    updatedAt: nowTimestamp(),
-  };
-  if (options?.markRead && status === "closed") {
-    update.unreadCount = 0;
-  }
-  await getDb().collection("conversations").doc(conversationId).update(update);
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: {
+      status,
+      ...(options?.markRead && status === "closed" ? { unreadCount: 0 } : {}),
+    },
+  });
 }
 
 export async function updateConversationAssignment(
@@ -555,54 +559,38 @@ export async function updateConversationAssignment(
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) throw new Error("Conversa não encontrada.");
 
-  const ts = nowTimestamp();
-  if (assignedTo) {
-    await getDb().collection("conversations").doc(conversationId).update({
-      assignedTo,
-      assignedAt: ts,
-      updatedAt: ts,
-    });
-  } else {
-    await getDb().collection("conversations").doc(conversationId).update({
-      assignedTo: FieldValue.delete(),
-      assignedAt: FieldValue.delete(),
-      updatedAt: ts,
-    });
-  }
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: assignedTo
+      ? { assignedTo, assignedAt: new Date() }
+      : { assignedTo: null, assignedAt: null },
+  });
 }
 
 export async function listContactLists(
   scope: CompanyScope
 ): Promise<ContactList[]> {
-  const snap = await getDb()
-    .collection("contact_lists")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  const lists = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as ContactList);
-  lists.sort((a, b) => {
-    const aMs = a.createdAt?.toMillis?.() ?? 0;
-    const bMs = b.createdAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
+  const rows = await getSql().contactList.findMany({
+    where: { companyId: scope.companyId },
+    orderBy: { createdAt: "desc" },
   });
-  return lists;
+  return rows.map(contactListFromRow);
 }
 
 export async function createContactList(
   data: Pick<ContactList, "name" | "description" | "tagFilter" | "contactIds">,
   scope: CompanyScope
 ): Promise<ContactList> {
-  const ts = nowTimestamp();
-  const ref = getDb().collection("contact_lists").doc();
-  const list: Omit<ContactList, "id"> = {
-    ...data,
-    contactIds: data.contactIds || [],
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...list });
-  return { id: ref.id, ...list };
+  const row = await getSql().contactList.create({
+    data: {
+      name: data.name,
+      description: data.description,
+      tagFilter: j(data.tagFilter),
+      contactIds: (data.contactIds || []) as Prisma.InputJsonValue,
+      companyId: scope.companyId,
+    },
+  });
+  return contactListFromRow(row);
 }
 
 export async function updateContactList(
@@ -610,75 +598,86 @@ export async function updateContactList(
   data: Partial<Pick<ContactList, "name" | "description" | "tagFilter" | "contactIds">>,
   scope: CompanyScope
 ): Promise<ContactList | null> {
-  const doc = await getDb().collection("contact_lists").doc(listId).get();
-  if (!doc.exists) return null;
-  const existing = doc.data() as ContactList;
-  if (existing.companyId !== scope.companyId) return null;
+  const sql = getSql();
+  const existing = await sql.contactList.findFirst({
+    where: { id: listId, companyId: scope.companyId },
+  });
+  if (!existing) return null;
 
-  const patch = {
-    ...data,
-    updatedAt: nowTimestamp(),
-  };
-  await doc.ref.update(patch);
-  return { ...existing, ...patch, id: listId };
+  const row = await sql.contactList.update({
+    where: { id: listId },
+    data: {
+      ...(data.name !== undefined ? { name: data.name } : {}),
+      ...(data.description !== undefined ? { description: data.description } : {}),
+      ...(data.tagFilter !== undefined
+        ? { tagFilter: data.tagFilter as Prisma.InputJsonValue }
+        : {}),
+      ...(data.contactIds !== undefined
+        ? { contactIds: data.contactIds as Prisma.InputJsonValue }
+        : {}),
+    },
+  });
+  return contactListFromRow(row);
 }
 
 export async function deleteContactList(
   listId: string,
   scope: CompanyScope
 ): Promise<boolean> {
-  const doc = await getDb().collection("contact_lists").doc(listId).get();
-  if (!doc.exists) return false;
-  const existing = doc.data() as ContactList;
-  if (existing.companyId !== scope.companyId) return false;
-  await doc.ref.delete();
-  return true;
+  const result = await getSql().contactList.deleteMany({
+    where: { id: listId, companyId: scope.companyId },
+  });
+  return result.count > 0;
 }
 
 export async function getContactsForList(
   listId: string,
   scope: CompanyScope
 ): Promise<Contact[]> {
-  const doc = await getDb().collection("contact_lists").doc(listId).get();
-  if (!doc.exists) return [];
-  const list = doc.data() as ContactList;
-  if (list.companyId !== scope.companyId) return [];
+  const sql = getSql();
+  const listRow = await sql.contactList.findFirst({
+    where: { id: listId, companyId: scope.companyId },
+  });
+  if (!listRow) return [];
+  const list = contactListFromRow(listRow);
 
   if (list.contactIds?.length) {
-    const contacts: Contact[] = [];
-    for (const id of list.contactIds) {
-      const c = await getContactById(id, scope);
-      if (c && !c.blocked && c.optIn) contacts.push(c);
-    }
-    return contacts;
+    const rows = await sql.contact.findMany({
+      where: {
+        id: { in: list.contactIds },
+        companyId: scope.companyId,
+        blocked: false,
+        optIn: true,
+      },
+    });
+    return rows.map(contactFromRow);
   }
 
+  const rows = await sql.contact.findMany({
+    where: { companyId: scope.companyId, blocked: false, optIn: true },
+  });
+  const contacts = rows.map(contactFromRow);
+
   if (list.tagFilter?.length) {
-    const all = await listContacts(scope);
-    return all.filter(
-      (c) =>
-        !c.blocked &&
-        c.optIn &&
-        list.tagFilter!.some((tag) => c.tags?.includes(tag))
+    return contacts.filter((c) =>
+      list.tagFilter!.some((tag) => c.tags?.includes(tag))
     );
   }
 
-  return listContacts(scope).then((all) =>
-    all.filter((c) => !c.blocked && c.optIn)
-  );
+  return contacts;
 }
 
 export async function markConversationRead(conversationId: string): Promise<void> {
-  await getDb().collection("conversations").doc(conversationId).update({
-    unreadCount: 0,
-    updatedAt: nowTimestamp(),
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: { unreadCount: 0 },
   });
 }
 
 export async function markConversationUnread(conversationId: string): Promise<void> {
-  await getDb().collection("conversations").doc(conversationId).update({
-    unreadCount: 1,
-    updatedAt: nowTimestamp(),
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: { unreadCount: 1 },
   });
 }
 
@@ -686,10 +685,59 @@ export async function updateConversationConnection(
   conversationId: string,
   connectionId: string
 ): Promise<void> {
-  await getDb().collection("conversations").doc(conversationId).update({
-    connectionId,
-    updatedAt: nowTimestamp(),
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: { connectionId },
   });
+}
+
+export async function updateConversationLabels(
+  conversationId: string,
+  labels: string[],
+  scope: CompanyScope
+): Promise<void> {
+  const conversation = await getConversationById(conversationId, scope);
+  if (!conversation) throw new Error("Conversa não encontrada.");
+  const clean = [...new Set(labels.map((l) => l.trim()).filter(Boolean))].slice(0, 20);
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: { labels: clean as Prisma.InputJsonValue },
+  });
+}
+
+/** Nota interna do time — entra na timeline, nunca é enviada ao contato. */
+export async function saveInternalNote(
+  conversationId: string,
+  body: string,
+  sender: { sentByUid?: string; sentByName?: string },
+  scope: CompanyScope
+): Promise<Message | null> {
+  const conversation = await getConversationById(conversationId, scope);
+  if (!conversation) return null;
+
+  const row = await getSql().message.create({
+    data: {
+      conversationId,
+      contactId: conversation.contactId,
+      companyId: scope.companyId,
+      direction: "outbound",
+      type: "note",
+      body,
+      status: "accepted",
+      sentByUid: sender.sentByUid,
+      sentByName: sender.sentByName,
+      createdAt: new Date(),
+    },
+  });
+
+  const { publishRealtime } = await import("./realtime");
+  publishRealtime(scope.companyId, {
+    type: "message:new",
+    conversationId,
+    direction: "outbound",
+  });
+
+  return messageFromRow(row);
 }
 
 /** Garante connectionId na conversa (usa conexão default se ausente). */
@@ -719,41 +767,62 @@ export async function saveInboundMessage(
     status?: Message["status"];
   }
 ): Promise<Message> {
-  const ts = nowTimestamp();
-  const ref = getDb()
-    .collection("conversations")
-    .doc(data.conversationId)
-    .collection("messages")
-    .doc();
+  const sql = getSql();
+  const conversation = await sql.conversation.findUnique({
+    where: { id: data.conversationId },
+    select: { companyId: true },
+  });
 
-  const message: Omit<Message, "id"> = {
-    ...data,
-    direction: "inbound",
-    status: data.status || "received",
-    createdAt: ts,
-  };
+  const row = await sql.message.create({
+    data: {
+      conversationId: data.conversationId,
+      contactId: data.contactId,
+      companyId: conversation?.companyId,
+      whatsappMessageId: data.whatsappMessageId,
+      direction: "inbound",
+      type: data.type,
+      body: data.body,
+      status: data.status || "received",
+      media: j(data.media),
+      templateName: data.templateName,
+      templateParameters: j(data.templateParameters),
+      templateRenderedBody: data.templateRenderedBody,
+      templateFooter: data.templateFooter,
+      templateButtons: j(data.templateButtons),
+      replyTo: j(data.replyTo),
+      reactions: j(data.reactions),
+      interactivePayload: data.interactivePayload,
+      rawPayload: j(data.rawPayload),
+      statusError: data.statusError,
+      connectionId: data.connectionId,
+      sentByUid: data.sentByUid,
+      sentByName: data.sentByName,
+      createdAt: new Date(),
+    },
+  });
 
-  await ref.set({ id: ref.id, ...message });
   await updateConversationLastMessage(data.conversationId, data.body, true);
 
-  if (data.whatsappMessageId) {
-    const conversation = await getDb()
-      .collection("conversations")
-      .doc(data.conversationId)
-      .get();
-    const companyId = conversation.data()?.companyId as string | undefined;
-    if (companyId) {
-      const { saveWhatsAppMessageRef } = await import("./whatsapp-message-refs");
-      await saveWhatsAppMessageRef({
-        whatsappMessageId: data.whatsappMessageId,
-        companyId,
-        conversationId: data.conversationId,
-        messageId: ref.id,
-      });
-    }
+  if (data.whatsappMessageId && conversation?.companyId) {
+    const { saveWhatsAppMessageRef } = await import("./whatsapp-message-refs");
+    await saveWhatsAppMessageRef({
+      whatsappMessageId: data.whatsappMessageId,
+      companyId: conversation.companyId,
+      conversationId: data.conversationId,
+      messageId: row.id,
+    });
   }
 
-  return { id: ref.id, ...message };
+  if (conversation?.companyId) {
+    const { publishRealtime } = await import("./realtime");
+    publishRealtime(conversation.companyId, {
+      type: "message:new",
+      conversationId: data.conversationId,
+      direction: "inbound",
+    });
+  }
+
+  return messageFromRow(row);
 }
 
 export async function saveOutboundMessage(
@@ -761,49 +830,70 @@ export async function saveOutboundMessage(
     direction?: Message["direction"];
   }
 ): Promise<Message> {
-  const ts = nowTimestamp();
-  const ref = getDb()
-    .collection("conversations")
-    .doc(data.conversationId)
-    .collection("messages")
-    .doc();
+  const sql = getSql();
+  const conversation = await sql.conversation.findUnique({
+    where: { id: data.conversationId },
+    select: { companyId: true, firstResponseAt: true },
+  });
 
-  const message: Omit<Message, "id"> = {
-    ...data,
-    direction: data.direction || "outbound",
-    createdAt: ts,
-  };
+  const now = new Date();
+  const row = await sql.message.create({
+    data: {
+      conversationId: data.conversationId,
+      contactId: data.contactId,
+      companyId: conversation?.companyId,
+      whatsappMessageId: data.whatsappMessageId,
+      direction: data.direction || "outbound",
+      type: data.type,
+      body: data.body,
+      status: data.status,
+      media: j(data.media),
+      templateName: data.templateName,
+      templateParameters: j(data.templateParameters),
+      templateRenderedBody: data.templateRenderedBody,
+      templateFooter: data.templateFooter,
+      templateButtons: j(data.templateButtons),
+      replyTo: j(data.replyTo),
+      reactions: j(data.reactions),
+      interactivePayload: data.interactivePayload,
+      rawPayload: j(data.rawPayload),
+      statusError: data.statusError,
+      connectionId: data.connectionId,
+      sentByUid: data.sentByUid,
+      sentByName: data.sentByName,
+      createdAt: now,
+    },
+  });
 
-  await ref.set({ id: ref.id, ...message });
   await updateConversationLastMessage(data.conversationId, data.body, false);
 
-  const convDoc = await getDb().collection("conversations").doc(data.conversationId).get();
-  const convData = convDoc.data() as Conversation | undefined;
-  if (convData && !convData.firstResponseAt) {
-    await convDoc.ref.update({
-      firstResponseAt: ts,
-      updatedAt: ts,
+  if (conversation && !conversation.firstResponseAt) {
+    await sql.conversation.update({
+      where: { id: data.conversationId },
+      data: { firstResponseAt: now },
     });
   }
 
-  if (data.whatsappMessageId) {
-    const conversation = await getDb()
-      .collection("conversations")
-      .doc(data.conversationId)
-      .get();
-    const companyId = conversation.data()?.companyId as string | undefined;
-    if (companyId) {
-      const { saveWhatsAppMessageRef } = await import("./whatsapp-message-refs");
-      await saveWhatsAppMessageRef({
-        whatsappMessageId: data.whatsappMessageId,
-        companyId,
-        conversationId: data.conversationId,
-        messageId: ref.id,
-      });
-    }
+  if (data.whatsappMessageId && conversation?.companyId) {
+    const { saveWhatsAppMessageRef } = await import("./whatsapp-message-refs");
+    await saveWhatsAppMessageRef({
+      whatsappMessageId: data.whatsappMessageId,
+      companyId: conversation.companyId,
+      conversationId: data.conversationId,
+      messageId: row.id,
+    });
   }
 
-  return { id: ref.id, ...message };
+  if (conversation?.companyId) {
+    const { publishRealtime } = await import("./realtime");
+    publishRealtime(conversation.companyId, {
+      type: "message:new",
+      conversationId: data.conversationId,
+      direction: "outbound",
+    });
+  }
+
+  return messageFromRow(row);
 }
 
 export async function updateMessageStatusByWhatsAppId(
@@ -819,19 +909,19 @@ export async function updateMessageStatusByWhatsAppId(
     return;
   }
 
-  const update: Record<string, unknown> = { status };
-  if (statusError) {
-    update.statusError = statusError;
-  } else if (status !== "failed") {
-    update.statusError = null;
-  }
+  await getSql().message.update({
+    where: { id: known.messageId },
+    data: {
+      status,
+      statusError: statusError ?? (status !== "failed" ? null : undefined),
+    },
+  });
 
-  await getDb()
-    .collection("conversations")
-    .doc(known.conversationId)
-    .collection("messages")
-    .doc(known.messageId)
-    .update(update);
+  const { publishRealtime } = await import("./realtime");
+  publishRealtime(known.companyId, {
+    type: "message:status",
+    conversationId: known.conversationId,
+  });
 }
 
 export async function updateMessageAfterResend(
@@ -841,24 +931,22 @@ export async function updateMessageAfterResend(
     whatsappMessageId?: string;
     status: Message["status"];
     rawPayload?: unknown;
+    statusError?: string | null;
   }
 ): Promise<void> {
-  const update: Record<string, unknown> = {
-    status: data.status,
-    updatedAt: nowTimestamp(),
-  };
-  if (data.whatsappMessageId) {
-    update.whatsappMessageId = data.whatsappMessageId;
-  }
-  if (data.rawPayload !== undefined) {
-    update.rawPayload = data.rawPayload;
-  }
-  await getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages")
-    .doc(messageId)
-    .update(update);
+  await getSql().message.updateMany({
+    where: { id: messageId, conversationId },
+    data: {
+      status: data.status,
+      ...(data.whatsappMessageId
+        ? { whatsappMessageId: data.whatsappMessageId }
+        : {}),
+      ...(data.rawPayload !== undefined
+        ? { rawPayload: data.rawPayload as Prisma.InputJsonValue }
+        : {}),
+      ...(data.statusError !== undefined ? { statusError: data.statusError } : {}),
+    },
+  });
 }
 
 export async function listConversations(
@@ -875,55 +963,70 @@ export async function listConversations(
     period?: "today" | "yesterday" | "7d" | "30d";
     search?: string;
     noResponseOnly?: boolean;
+    /** Etiqueta da conversa (labels), distinta das tags do contato. */
+    label?: string;
   }
 ): Promise<ConversationListItem[]> {
-  let query = getDb()
-    .collection("conversations")
-    .where("companyId", "==", scope.companyId) as FirebaseFirestore.Query;
+  const sql = getSql();
 
-  if (filters?.status) {
-    query = query.where("status", "==", filters.status);
+  let periodRange: { start: Date; end: Date } | null = null;
+  if (filters?.period) {
+    const now = new Date();
+    const startOfDay = (d: Date) =>
+      new Date(d.getFullYear(), d.getMonth(), d.getDate());
+
+    switch (filters.period) {
+      case "today":
+        periodRange = { start: startOfDay(now), end: now };
+        break;
+      case "yesterday": {
+        const y = new Date(now);
+        y.setDate(y.getDate() - 1);
+        periodRange = { start: startOfDay(y), end: startOfDay(now) };
+        break;
+      }
+      case "7d":
+        periodRange = {
+          start: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+          end: now,
+        };
+        break;
+      case "30d":
+        periodRange = {
+          start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+          end: now,
+        };
+        break;
+    }
   }
 
-  const snap = await query.orderBy("lastMessageAt", "desc").get();
-
-  let conversations = snap.docs.map(
-    (doc) => ({ id: doc.id, ...doc.data() }) as Conversation
-  );
-
-  // Uma thread por telefone — evita duplicatas na lista e cliques em conversa vazia.
-  const byPhone = new Map<string, Conversation>();
-  for (const c of conversations) {
-    let key = c.phone;
-    try {
-      key = normalizePhone(c.phone);
-    } catch {
-      key = c.phone.replace(/\D/g, "");
-    }
-    const existing = byPhone.get(key);
-    if (!existing) {
-      byPhone.set(key, c);
-      continue;
-    }
-    const existingMs = existing.lastMessageAt?.toMillis?.() ?? 0;
-    const currentMs = c.lastMessageAt?.toMillis?.() ?? 0;
-    if (currentMs >= existingMs) byPhone.set(key, c);
-  }
-  conversations = [...byPhone.values()].sort((a, b) => {
-    const aMs = a.lastMessageAt?.toMillis?.() ?? 0;
-    const bMs = b.lastMessageAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
+  const rows = await sql.conversation.findMany({
+    where: {
+      companyId: scope.companyId,
+      ...(filters?.status ? { status: filters.status } : {}),
+      ...(filters?.unreadOnly ? { unreadCount: { gt: 0 } } : {}),
+      ...(filters?.assignedTo === "__unassigned__"
+        ? { assignedTo: null }
+        : filters?.assignedTo
+          ? { assignedTo: filters.assignedTo }
+          : {}),
+      ...(periodRange
+        ? { lastMessageAt: { gte: periodRange.start, lte: periodRange.end } }
+        : {}),
+    },
+    orderBy: { lastMessageAt: "desc" },
   });
 
-  if (filters?.assignedTo === "__unassigned__") {
-    conversations = conversations.filter((c) => !c.assignedTo);
-  } else if (filters?.assignedTo) {
-    conversations = conversations.filter((c) => c.assignedTo === filters.assignedTo);
+  // Uma thread por telefone — evita duplicatas na lista e cliques em conversa vazia.
+  // As linhas vêm ordenadas por lastMessageAt desc; a primeira de cada telefone é a mais recente.
+  const byPhone = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const key = row.phoneNormalized || row.phone;
+    if (!byPhone.has(key)) byPhone.set(key, row);
   }
-
-  if (filters?.unreadOnly) {
-    conversations = conversations.filter((c) => (c.unreadCount || 0) > 0);
-  }
+  let conversations = [...byPhone.values()]
+    .sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime())
+    .map(conversationFromRow);
 
   if (filters?.connectionId || filters?.window) {
     const { listConnections } = await import("./connections");
@@ -954,63 +1057,21 @@ export async function listConversations(
     }
   }
 
-  if (filters?.period) {
-    const { toDate } = await import("./conversation-window");
-    const now = new Date();
-    const startOfDay = (d: Date) =>
-      new Date(d.getFullYear(), d.getMonth(), d.getDate());
-
-    let rangeStart: Date | null = null;
-    let rangeEnd: Date | null = null;
-
-    switch (filters.period) {
-      case "today":
-        rangeStart = startOfDay(now);
-        rangeEnd = now;
-        break;
-      case "yesterday": {
-        const y = new Date(now);
-        y.setDate(y.getDate() - 1);
-        rangeStart = startOfDay(y);
-        rangeEnd = startOfDay(now);
-        break;
-      }
-      case "7d":
-        rangeStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        rangeEnd = now;
-        break;
-      case "30d":
-        rangeStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        rangeEnd = now;
-        break;
-    }
-
-    if (rangeStart && rangeEnd) {
-      const startMs = rangeStart.getTime();
-      const endMs = rangeEnd.getTime();
-      conversations = conversations.filter((c) => {
-        const date = toDate(c.lastMessageAt as Parameters<typeof toDate>[0]);
-        if (!date) return false;
-        const ms = date.getTime();
-        return ms >= startMs && ms <= endMs;
-      });
-    }
-  }
-
   const contactIds = [...new Set(conversations.map((c) => c.contactId))];
   const contactMap = new Map<string, { name: string; tags: string[] }>();
 
-  await Promise.all(
-    contactIds.map(async (id) => {
-      const doc = await getDb().collection("contacts").doc(id).get();
-      if (doc.exists) {
-        const contact = doc.data() as Contact;
-        if (contact.companyId === scope.companyId) {
-          contactMap.set(id, { name: contact.name, tags: contact.tags || [] });
-        }
-      }
-    })
-  );
+  if (contactIds.length > 0) {
+    const contactRows = await sql.contact.findMany({
+      where: { id: { in: contactIds }, companyId: scope.companyId },
+      select: { id: true, name: true, tags: true },
+    });
+    for (const contact of contactRows) {
+      contactMap.set(contact.id, {
+        name: contact.name,
+        tags: (contact.tags as string[] | null) || [],
+      });
+    }
+  }
 
   if (filters?.tag) {
     conversations = conversations.filter((c) => {
@@ -1019,19 +1080,42 @@ export async function listConversations(
     });
   }
 
+  if (filters?.label) {
+    conversations = conversations.filter((c) =>
+      c.labels?.includes(filters.label!)
+    );
+  }
+
   if (filters?.search) {
     const q = filters.search.trim().toLowerCase();
     if (q) {
+      // Busca também no corpo das mensagens (histórico), não só nome/telefone.
+      const messageMatches = await sql.message.findMany({
+        where: {
+          companyId: scope.companyId,
+          body: { contains: q },
+        },
+        select: { conversationId: true },
+        distinct: ["conversationId"],
+        take: 200,
+      });
+      const matchedByMessage = new Set(
+        messageMatches.map((m) => m.conversationId)
+      );
+
       conversations = conversations.filter((c) => {
         const contact = contactMap.get(c.contactId);
         const name = (contact?.name || "").toLowerCase();
-        return name.includes(q) || (c.phone || "").toLowerCase().includes(q);
+        return (
+          name.includes(q) ||
+          (c.phone || "").toLowerCase().includes(q) ||
+          matchedByMessage.has(c.id)
+        );
       });
     }
   }
 
   if (filters?.noResponseOnly) {
-    const { isWithinConversationWindow } = await import("./conversation-window");
     conversations = conversations.filter((c) => {
       if (c.firstResponseAt) return false;
       return isWithinConversationWindow(c.lastInboundAt);
@@ -1057,40 +1141,31 @@ export async function listConversationMessages(
   scope: CompanyScope,
   options?: { limit?: number; before?: number }
 ): Promise<{ messages: Message[]; hasMore: boolean }> {
+  const sql = getSql();
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) return { messages: [], hasMore: false };
 
-  const messagesRef = getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages");
-
   if (!options?.limit && !options?.before) {
-    const snap = await messagesRef.orderBy("createdAt", "asc").get();
-    return {
-      messages: snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Message),
-      hasMore: false,
-    };
+    const rows = await sql.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: "asc" },
+    });
+    return { messages: rows.map(messageFromRow), hasMore: false };
   }
 
   const limit = Math.min(Math.max(options.limit ?? 30, 1), 100);
-  let query = messagesRef.orderBy("createdAt", "desc") as Query;
+  const rows = await sql.message.findMany({
+    where: {
+      conversationId,
+      ...(options.before ? { createdAt: { lt: new Date(options.before) } } : {}),
+    },
+    orderBy: { createdAt: "desc" },
+    take: limit + 1,
+  });
 
-  if (options.before) {
-    query = query.where(
-      "createdAt",
-      "<",
-      Timestamp.fromMillis(options.before)
-    );
-  }
-
-  const snap = await query.limit(limit + 1).get();
-  const docs = snap.docs;
-  const hasMore = docs.length > limit;
-  const slice = hasMore ? docs.slice(0, limit) : docs;
-  const messages = slice
-    .map((doc) => ({ id: doc.id, ...doc.data() }) as Message)
-    .reverse();
+  const hasMore = rows.length > limit;
+  const slice = hasMore ? rows.slice(0, limit) : rows;
+  const messages = slice.map(messageFromRow).reverse();
 
   return { messages, hasMore };
 }
@@ -1103,15 +1178,10 @@ export async function getConversationMessage(
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) return null;
 
-  const doc = await getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages")
-    .doc(messageId)
-    .get();
-
-  if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() } as Message;
+  const row = await getSql().message.findFirst({
+    where: { id: messageId, conversationId },
+  });
+  return row ? messageFromRow(row) : null;
 }
 
 export async function applyMessageReaction(
@@ -1120,19 +1190,16 @@ export async function applyMessageReaction(
   reaction: MessageReaction,
   scope: CompanyScope
 ): Promise<void> {
+  const sql = getSql();
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) return;
 
-  const docRef = getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages")
-    .doc(messageId);
+  const row = await sql.message.findFirst({
+    where: { id: messageId, conversationId },
+  });
+  if (!row) return;
 
-  const doc = await docRef.get();
-  if (!doc.exists) return;
-
-  const existing = doc.data() as Message;
+  const existing = messageFromRow(row);
   const reactions = [...(existing.reactions || [])];
   const index = reactions.findIndex((item) => item.from === reaction.from);
 
@@ -1144,7 +1211,10 @@ export async function applyMessageReaction(
     reactions.push(reaction);
   }
 
-  await docRef.set({ reactions }, { merge: true });
+  await sql.message.update({
+    where: { id: messageId },
+    data: { reactions: reactions as unknown as Prisma.InputJsonValue },
+  });
 }
 
 export async function updateConversationMessageMedia(
@@ -1156,12 +1226,10 @@ export async function updateConversationMessageMedia(
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) return;
 
-  await getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages")
-    .doc(messageId)
-    .set({ media }, { merge: true });
+  await getSql().message.updateMany({
+    where: { id: messageId, conversationId },
+    data: { media: media as unknown as Prisma.InputJsonValue },
+  });
 }
 
 export async function markMessageDeleted(
@@ -1172,86 +1240,34 @@ export async function markMessageDeleted(
   const conversation = await getConversationById(conversationId, scope);
   if (!conversation) return;
 
-  await getDb()
-    .collection("conversations")
-    .doc(conversationId)
-    .collection("messages")
-    .doc(messageId)
-    .set(
-      { deletedAt: nowTimestamp(), body: "" },
-      { merge: true }
-    );
+  await getSql().message.updateMany({
+    where: { id: messageId, conversationId },
+    data: { deletedAt: new Date(), body: "" },
+  });
 }
 
 export async function listTemplates(): Promise<Template[]> {
   await ensureDefaultTemplate();
-  const snap = await getDb().collection("templates").orderBy("name").get();
-  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Template);
+  const rows = await getSql().template.findMany({ orderBy: { name: "asc" } });
+  return rows.map(templateFromRow);
 }
 
 export async function getDashboardStats(scope: CompanyScope): Promise<DashboardStats> {
+  const sql = getSql();
   const companyId = scope.companyId;
 
-  const [contactsCount, conversationsCount] = await Promise.all([
-    getDb()
-      .collection("contacts")
-      .where("companyId", "==", companyId)
-      .count()
-      .get(),
-    getDb()
-      .collection("conversations")
-      .where("companyId", "==", companyId)
-      .count()
-      .get(),
-  ]);
-
-  const conversationsSnap = await getDb()
-    .collection("conversations")
-    .where("companyId", "==", companyId)
-    .select()
-    .get();
-
-  const conversationIds = conversationsSnap.docs.map((doc) => doc.id);
-
-  let messagesSent = 0;
-  let messagesReceived = 0;
-  let messagesFailed = 0;
-
-  await Promise.all(
-    conversationIds.map(async (conversationId) => {
-      const [sent, received, failed] = await Promise.all([
-        getDb()
-          .collection("conversations")
-          .doc(conversationId)
-          .collection("messages")
-          .where("direction", "==", "outbound")
-          .count()
-          .get(),
-        getDb()
-          .collection("conversations")
-          .doc(conversationId)
-          .collection("messages")
-          .where("direction", "==", "inbound")
-          .count()
-          .get(),
-        getDb()
-          .collection("conversations")
-          .doc(conversationId)
-          .collection("messages")
-          .where("status", "==", "failed")
-          .count()
-          .get(),
-      ]);
-
-      messagesSent += sent.data().count;
-      messagesReceived += received.data().count;
-      messagesFailed += failed.data().count;
-    })
-  );
+  const [totalContacts, totalConversations, messagesSent, messagesReceived, messagesFailed] =
+    await Promise.all([
+      sql.contact.count({ where: { companyId } }),
+      sql.conversation.count({ where: { companyId } }),
+      sql.message.count({ where: { companyId, direction: "outbound" } }),
+      sql.message.count({ where: { companyId, direction: "inbound" } }),
+      sql.message.count({ where: { companyId, status: "failed" } }),
+    ]);
 
   return {
-    totalContacts: contactsCount.data().count,
-    totalConversations: conversationsCount.data().count,
+    totalContacts,
+    totalConversations,
     messagesSent,
     messagesReceived,
     messagesFailed,
@@ -1264,13 +1280,12 @@ export async function saveIntegrationEvent(
   status: "success" | "failed",
   scope: CompanyScope
 ): Promise<void> {
-  const ref = getDb().collection("integration_events").doc();
-  await ref.set({
-    id: ref.id,
-    source,
-    payload,
-    status,
-    companyId: scope.companyId,
-    createdAt: nowTimestamp(),
+  await getSql().integrationEvent.create({
+    data: {
+      source,
+      payload: j(payload),
+      status,
+      companyId: scope.companyId,
+    },
   });
 }

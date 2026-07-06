@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/api-guard";
 import {
   getConnection,
   updateConnection,
-  connectionToWhatsAppConfig,
+  resolveConnectionConfig,
 } from "@/lib/connections";
 import { createWhatsAppProvider } from "@/lib/whatsapp";
 
@@ -33,7 +33,7 @@ export async function POST(
   if (connection.provider !== "meta_cloud" && connection.instanceId) {
     try {
       const provider = createWhatsAppProvider(
-        connectionToWhatsAppConfig(connection)
+        await resolveConnectionConfig(connection)
       );
       if (provider.logout) {
         await provider.logout(connection.instanceId);

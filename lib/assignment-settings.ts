@@ -1,4 +1,5 @@
-import { getDb } from "./firebase-admin";
+import { Prisma } from "@prisma/client";
+import { getSql } from "./db";
 import type { AssignmentSettings } from "./types";
 
 export const DEFAULT_ASSIGNMENT_SETTINGS: AssignmentSettings = {
@@ -49,11 +50,19 @@ function sanitizeAssignmentSettings(
   };
 }
 
+/** JSON serializável — remove chaves undefined antes de gravar. */
+function toJson(settings: AssignmentSettings): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(settings)) as Prisma.InputJsonValue;
+}
+
 export async function getAssignmentSettings(
   companyId: string
 ): Promise<AssignmentSettings> {
-  const doc = await getDb().collection("companies").doc(companyId).get();
-  const raw = doc.data()?.assignment as Partial<AssignmentSettings> | undefined;
+  const row = await getSql().companySettings.findUnique({
+    where: { companyId },
+    select: { assignmentSettings: true },
+  });
+  const raw = row?.assignmentSettings as Partial<AssignmentSettings> | null;
   return sanitizeAssignmentSettings(raw);
 }
 
@@ -63,10 +72,12 @@ export async function updateAssignmentSettings(
 ): Promise<AssignmentSettings> {
   const current = await getAssignmentSettings(companyId);
   const merged = sanitizeAssignmentSettings({ ...current, ...patch });
-  await getDb()
-    .collection("companies")
-    .doc(companyId)
-    .set({ assignment: merged }, { merge: true });
+
+  await getSql().companySettings.upsert({
+    where: { companyId },
+    create: { companyId, assignmentSettings: toJson(merged) },
+    update: { assignmentSettings: toJson(merged) },
+  });
   return merged;
 }
 
@@ -74,8 +85,5 @@ export async function setLastRoundRobinUid(
   companyId: string,
   uid: string
 ): Promise<void> {
-  await getDb()
-    .collection("companies")
-    .doc(companyId)
-    .set({ assignment: { lastRoundRobinUid: uid } }, { merge: true });
+  await updateAssignmentSettings(companyId, { lastRoundRobinUid: uid });
 }

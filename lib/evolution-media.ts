@@ -6,7 +6,7 @@ import {
   extractEvolutionMessageKeyFromWebhook,
   type EvolutionMediaMessageKey,
 } from "./whatsapp/evolution-provider";
-import { connectionToWhatsAppConfig, getConnection } from "./connections";
+import { resolveConnectionConfig, getConnection } from "./connections";
 
 function extensionForMime(mimeType: string, messageType: string): string {
   if (mimeType.includes("jpeg")) return "jpg";
@@ -96,7 +96,7 @@ async function downloadViaEvolution(params: {
 
   const provider = new EvolutionProvider(
     connection
-      ? connectionToWhatsAppConfig(connection)
+      ? await resolveConnectionConfig(connection)
       : {
           provider: "evolution",
           companyId: params.companyId,

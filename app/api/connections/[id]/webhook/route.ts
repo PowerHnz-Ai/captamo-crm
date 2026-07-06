@@ -5,7 +5,7 @@ import { resolveCompanyContext } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
 import {
   getConnection,
-  connectionToWhatsAppConfig,
+  resolveConnectionConfig,
 } from "@/lib/connections";
 import { createWhatsAppProvider } from "@/lib/whatsapp";
 
@@ -43,7 +43,7 @@ export async function POST(
 
   try {
     const provider = createWhatsAppProvider(
-      connectionToWhatsAppConfig(connection)
+      await resolveConnectionConfig(connection)
     );
     if (!provider.ensureWebhook) {
       return NextResponse.json(

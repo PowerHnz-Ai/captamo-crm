@@ -1,36 +1,34 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { Prisma } from "@prisma/client";
+import { getSql } from "./db";
+import { templateFromRow } from "./db-mappers";
 import type { CompanyScope } from "./firestore-repositories";
 import type { Template, TemplateStatus } from "./types";
 
-function nowTimestamp() {
-  return Timestamp.now();
+/** JSON opcional para escrita no Prisma (undefined = não altera a coluna). */
+function j(value: unknown): Prisma.InputJsonValue | undefined {
+  return value === undefined || value === null
+    ? undefined
+    : (value as Prisma.InputJsonValue);
 }
 
 export async function listTemplatesForCompany(
   scope: CompanyScope
 ): Promise<Template[]> {
-  const snap = await getDb()
-    .collection("templates")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  let templates = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Template);
-
-  if (templates.length === 0) {
-    const legacy = await getDb().collection("templates").get();
-    templates = legacy.docs
-      .map((doc) => ({ id: doc.id, ...doc.data() }) as Template)
-      .filter((t) => !t.companyId || t.companyId === scope.companyId);
-  }
-
-  templates.sort((a, b) => {
-    const aMs = a.updatedAt?.toMillis?.() ?? 0;
-    const bMs = b.updatedAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
+  const sql = getSql();
+  let rows = await sql.template.findMany({
+    where: { companyId: scope.companyId },
+    orderBy: { updatedAt: "desc" },
   });
 
-  return templates;
+  if (rows.length === 0) {
+    // Templates legados sem companyId (globais) continuam visíveis.
+    rows = await sql.template.findMany({
+      where: { OR: [{ companyId: null }, { companyId: scope.companyId }] },
+      orderBy: { updatedAt: "desc" },
+    });
+  }
+
+  return rows.map(templateFromRow);
 }
 
 export async function getTemplateByName(
@@ -45,9 +43,9 @@ export async function getTemplate(
   id: string,
   scope: CompanyScope
 ): Promise<Template | null> {
-  const doc = await getDb().collection("templates").doc(id).get();
-  if (!doc.exists) return null;
-  const template = { id: doc.id, ...doc.data() } as Template;
+  const row = await getSql().template.findUnique({ where: { id } });
+  if (!row) return null;
+  const template = templateFromRow(row);
   if (template.companyId && template.companyId !== scope.companyId) return null;
   return template;
 }
@@ -67,18 +65,22 @@ export async function createTemplateDraft(
   >,
   scope: CompanyScope
 ): Promise<Template> {
-  const ts = nowTimestamp();
-  const ref = getDb().collection("templates").doc();
-  const template: Omit<Template, "id"> = {
-    ...data,
-    status: "draft",
-    companyId: scope.companyId,
-    requiresMetaApproval: data.requiresMetaApproval ?? true,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...template });
-  return { id: ref.id, ...template };
+  const row = await getSql().template.create({
+    data: {
+      name: data.name,
+      language: data.language,
+      category: data.category,
+      body: data.body,
+      header: j(data.header),
+      variableSamples: j(data.variableSamples),
+      footer: data.footer,
+      buttons: j(data.buttons),
+      status: "draft",
+      companyId: scope.companyId,
+      requiresMetaApproval: data.requiresMetaApproval ?? true,
+    },
+  });
+  return templateFromRow(row);
 }
 
 export async function updateTemplateDraft(
@@ -106,14 +108,27 @@ export async function updateTemplateDraft(
     throw new Error("Apenas templates novos podem ser editados.");
   }
 
-  const patch: Record<string, unknown> = { updatedAt: nowTimestamp() };
-  for (const [key, value] of Object.entries(data)) {
-    if (value !== undefined) {
-      patch[key] = value;
-    }
-  }
-
-  await getDb().collection("templates").doc(id).update(patch);
+  await getSql().template.update({
+    where: { id },
+    data: {
+      ...(data.language !== undefined ? { language: data.language } : {}),
+      ...(data.category !== undefined ? { category: data.category } : {}),
+      ...(data.body !== undefined ? { body: data.body } : {}),
+      ...(data.header !== undefined
+        ? { header: data.header as unknown as Prisma.InputJsonValue }
+        : {}),
+      ...(data.variableSamples !== undefined
+        ? { variableSamples: data.variableSamples as Prisma.InputJsonValue }
+        : {}),
+      ...(data.footer !== undefined ? { footer: data.footer } : {}),
+      ...(data.buttons !== undefined
+        ? { buttons: data.buttons as unknown as Prisma.InputJsonValue }
+        : {}),
+      ...(data.requiresMetaApproval !== undefined
+        ? { requiresMetaApproval: data.requiresMetaApproval }
+        : {}),
+    },
+  });
   const updated = await getTemplate(id, scope);
   return updated!;
 }
@@ -123,10 +138,24 @@ export async function updateTemplateStatus(
   status: TemplateStatus,
   extra: Partial<Template> = {}
 ): Promise<void> {
-  await getDb()
-    .collection("templates")
-    .doc(id)
-    .update({ status, ...extra, updatedAt: nowTimestamp() });
+  await getSql().template.update({
+    where: { id },
+    data: {
+      status,
+      ...(extra.metaTemplateId !== undefined
+        ? { metaTemplateId: extra.metaTemplateId }
+        : {}),
+      ...(extra.submittedAt !== undefined
+        ? { submittedAt: new Date(extra.submittedAt) }
+        : {}),
+      ...(extra.approvedAt !== undefined
+        ? { approvedAt: new Date(extra.approvedAt) }
+        : {}),
+      ...(extra.rejectionReason !== undefined
+        ? { rejectionReason: extra.rejectionReason }
+        : {}),
+    },
+  });
 }
 
 export async function syncTemplatesFromProvider(
@@ -140,47 +169,45 @@ export async function syncTemplatesFromProvider(
     body: string;
   }>
 ): Promise<number> {
+  const sql = getSql();
   let synced = 0;
-  const existingSnap = await getDb()
-    .collection("templates")
-    .where("companyId", "==", scope.companyId)
-    .get();
 
+  const existingRows = await sql.template.findMany({
+    where: { companyId: scope.companyId },
+    select: { id: true, name: true, language: true },
+  });
   const existingByKey = new Map(
-    existingSnap.docs.map((doc) => {
-      const data = doc.data() as Template;
-      return [`${data.name}::${data.language || "pt_BR"}`, doc];
-    })
+    existingRows.map((row) => [`${row.name}::${row.language || "pt_BR"}`, row])
   );
 
   for (const pt of providerTemplates) {
     const key = `${pt.name}::${pt.language || "pt_BR"}`;
     const existing = existingByKey.get(key);
-    const ts = nowTimestamp();
+    const now = new Date();
 
     if (existing) {
-      await existing.ref.update({
-        status: pt.status,
-        body: pt.body,
-        metaTemplateId: pt.id,
-        approvedAt: pt.status === "approved" ? ts : undefined,
-        updatedAt: ts,
+      await sql.template.update({
+        where: { id: existing.id },
+        data: {
+          status: pt.status,
+          body: pt.body,
+          metaTemplateId: pt.id,
+          ...(pt.status === "approved" ? { approvedAt: now } : {}),
+        },
       });
     } else {
-      const ref = getDb().collection("templates").doc();
-      await ref.set({
-        id: ref.id,
-        name: pt.name,
-        language: pt.language,
-        category: pt.category,
-        status: pt.status,
-        body: pt.body,
-        metaTemplateId: pt.id,
-        companyId: scope.companyId,
-        requiresMetaApproval: true,
-        approvedAt: pt.status === "approved" ? ts : undefined,
-        createdAt: ts,
-        updatedAt: ts,
+      await sql.template.create({
+        data: {
+          name: pt.name,
+          language: pt.language,
+          category: pt.category,
+          status: pt.status,
+          body: pt.body,
+          metaTemplateId: pt.id,
+          companyId: scope.companyId,
+          requiresMetaApproval: true,
+          ...(pt.status === "approved" ? { approvedAt: now } : {}),
+        },
       });
     }
     synced++;

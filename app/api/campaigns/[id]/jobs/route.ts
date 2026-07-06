@@ -31,7 +31,7 @@ export async function GET(
       if (campaign.status === "running") {
         shouldSync = true;
       } else if (campaign.status === "finished" && campaign.updatedAt) {
-        const updatedMs = campaign.updatedAt.toMillis?.() ?? 0;
+        const updatedMs = campaign.updatedAt ?? 0;
         const hoursSince = (Date.now() - updatedMs) / (1000 * 60 * 60);
         shouldSync = hoursSince < 24;
       }

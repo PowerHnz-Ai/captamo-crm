@@ -9,6 +9,7 @@ import {
   updateContactSchema,
 } from "@/lib/validators";
 import { resolveCompanyContextOrError } from "@/lib/request-company";
+import { requirePermission } from "@/lib/api-guard";
 
 export async function GET(request: NextRequest) {
   const authResult = await resolveCompanyContextOrError(request);
@@ -16,22 +17,41 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
 
+  const perm = requirePermission(authResult.context.auth, "contacts.read");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
+  }
+
   try {
-    const tag = request.nextUrl.searchParams.get("tag") || undefined;
-    const search = request.nextUrl.searchParams.get("search") || undefined;
-    const originId = request.nextUrl.searchParams.get("originId") || undefined;
-    const archived = request.nextUrl.searchParams.get("archived");
+    const params = request.nextUrl.searchParams;
+    const tag = params.get("tag") || undefined;
+    const search = params.get("search") || undefined;
+    const originId = params.get("originId") || undefined;
+    const archived = params.get("archived");
+    const filters = {
+      tag,
+      search,
+      originId,
+      archived: archived === "true" ? true : archived === "false" ? false : undefined,
+    };
+    const scope = { companyId: authResult.context.companyId };
+
+    // Com `limit`, resposta paginada; sem, lista completa (compat com
+    // campanhas/listas, que precisam de todos os contatos).
+    const rawLimit = params.get("limit");
+    if (rawLimit) {
+      const limit = Math.min(200, Math.max(1, Number(rawLimit) || 0));
+      const offset = Math.max(0, Number(params.get("offset")) || 0);
+      const { listContactsPage } = await import("@/lib/firestore-repositories");
+      const { contacts, total } = await listContactsPage(scope, filters, {
+        limit,
+        offset,
+      });
+      return NextResponse.json({ contacts, total, limit, offset });
+    }
 
     const { listContacts } = await import("@/lib/firestore-repositories");
-    const contacts = await listContacts(
-      { companyId: authResult.context.companyId },
-      {
-        tag,
-        search,
-        originId,
-        archived: archived === "true" ? true : archived === "false" ? false : undefined,
-      }
-    );
+    const contacts = await listContacts(scope, filters);
     return NextResponse.json({ contacts });
   } catch (error) {
     console.error("[contacts GET]", error);
@@ -43,6 +63,11 @@ export async function POST(request: NextRequest) {
   const authResult = await resolveCompanyContextOrError(request);
   if (!authResult.ok) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
+  }
+
+  const perm = requirePermission(authResult.context.auth, "contacts.write");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
 
   try {
@@ -80,6 +105,11 @@ export async function PATCH(request: NextRequest) {
   const authResult = await resolveCompanyContextOrError(request);
   if (!authResult.ok) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
+  }
+
+  const perm = requirePermission(authResult.context.auth, "contacts.write");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
 
   try {
@@ -129,6 +159,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
 
+  const perm = requirePermission(authResult.context.auth, "contacts.write");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
+  }
+
   try {
     const id =
       request.nextUrl.searchParams.get("id") ||
@@ -157,6 +192,11 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
 
+  const perm = requirePermission(authResult.context.auth, "contacts.import");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
+  }
+
   try {
     const body = await request.json();
     const parsed = importContactsSchema.safeParse(body);
@@ -167,18 +207,30 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const rows = parsed.data.contacts.map((c) => ({
-      ...c,
-      phone: normalizePhone(c.phone),
-    }));
+    // Valida linha a linha: uma linha inválida não derruba o lote — entra no relatório.
+    const validRows: typeof parsed.data.contacts = [];
+    const invalid: Array<{ row: number; name: string; phone: string; reason: string }> = [];
+
+    parsed.data.contacts.forEach((c, index) => {
+      try {
+        validRows.push({ ...c, phone: normalizePhone(c.phone) });
+      } catch (err) {
+        invalid.push({
+          row: index + 1,
+          name: c.name,
+          phone: c.phone,
+          reason: err instanceof Error ? err.message : "Telefone inválido.",
+        });
+      }
+    });
 
     const { importContacts } = await import("@/lib/firestore-repositories");
-    const result = await importContacts(rows, {
+    const result = await importContacts(validRows, {
       companyId: authResult.context.companyId,
     }, {
       duplicatePolicy: parsed.data.duplicatePolicy,
     });
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, invalid });
   } catch (error) {
     console.error("[contacts import]", error);
     return NextResponse.json({ error: "Erro na importação." }, { status: 500 });

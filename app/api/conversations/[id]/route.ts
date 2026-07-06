@@ -15,10 +15,13 @@ import type { ConversationListItem } from "@/lib/types";
 
 const patchSchema = z.object({
   assignedTo: z.string().nullable().optional(),
+  /** Comentário opcional ao transferir — vira nota interna na timeline. */
+  transferComment: z.string().max(1000).optional(),
   status: z.enum(["open", "closed"]).optional(),
   markUnread: z.boolean().optional(),
   markRead: z.boolean().optional(),
   connectionId: z.string().optional(),
+  labels: z.array(z.string().min(1).max(40)).max(20).optional(),
 });
 
 async function enrichConversation(
@@ -112,7 +115,8 @@ export async function PATCH(
       body.status !== undefined ||
       body.markUnread === true ||
       body.markRead === true ||
-      body.connectionId !== undefined;
+      body.connectionId !== undefined ||
+      body.labels !== undefined;
 
     if (!hasUpdate) {
       return NextResponse.json({ error: "Nada para atualizar." }, { status: 400 });
@@ -125,6 +129,8 @@ export async function PATCH(
       markConversationUnread,
       markConversationRead,
       updateConversationConnection,
+      updateConversationLabels,
+      saveInternalNote,
     } = await import("@/lib/firestore-repositories");
 
     let conversation = await getConversationById(id, { companyId: context.companyId });
@@ -158,6 +164,24 @@ export async function PATCH(
         body.assignedTo,
         { companyId: context.companyId }
       );
+
+      // Transferência com comentário: registra nota interna com o contexto.
+      if (body.assignedTo && body.assignedTo !== auth.uid) {
+        const { getAttendantNameMap } = await import("@/lib/lead-assignment");
+        const { messageSenderFromAuth } = await import("@/lib/user-profiles");
+        const nameMap = await getAttendantNameMap({ companyId: context.companyId });
+        const targetName = nameMap.get(body.assignedTo) || "atendente";
+        const noteBody = body.transferComment?.trim()
+          ? `Transferida para ${targetName}: ${body.transferComment.trim()}`
+          : `Transferida para ${targetName}.`;
+        await saveInternalNote(
+          id,
+          noteBody,
+          messageSenderFromAuth(auth),
+          { companyId: context.companyId }
+        ).catch(() => null);
+      }
+
       conversation = {
         ...conversation,
         assignedTo: body.assignedTo || undefined,
@@ -194,8 +218,21 @@ export async function PATCH(
       conversation = { ...conversation, connectionId: body.connectionId };
     }
 
+    if (body.labels !== undefined) {
+      await updateConversationLabels(id, body.labels, {
+        companyId: context.companyId,
+      });
+      conversation = { ...conversation, labels: body.labels };
+    }
+
     const fresh = await getConversationById(id, { companyId: context.companyId });
     const enriched = await enrichConversation(fresh || conversation, context.companyId);
+
+    const { publishRealtime } = await import("@/lib/realtime");
+    publishRealtime(context.companyId, {
+      type: "conversation:updated",
+      conversationId: id,
+    });
 
     return NextResponse.json({ conversation: enriched });
   } catch (error) {
@@ -251,6 +288,12 @@ export async function DELETE(
     if (!removed) {
       return NextResponse.json({ error: "Conversa não encontrada." }, { status: 404 });
     }
+
+    const { publishRealtime } = await import("@/lib/realtime");
+    publishRealtime(context.companyId, {
+      type: "conversation:updated",
+      conversationId: id,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

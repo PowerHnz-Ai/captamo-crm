@@ -1,5 +1,6 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { Prisma } from "@prisma/client";
+import { getSql } from "./db";
+import { campaignFromRow, campaignJobFromRow } from "./db-mappers";
 import type { Campaign, CampaignJob, CampaignJobStatus, Contact } from "./types";
 import { canSendMessages } from "./messaging-limits";
 import {
@@ -7,7 +8,7 @@ import {
   extractResolvedWhatsAppId,
   normalizePhone,
 } from "./whatsapp/phone";
-import { getWhatsAppProvider } from "./whatsapp";
+import { getWhatsAppProvider, WhatsAppNotConfiguredError } from "./whatsapp";
 import type { CompanyScope } from "./firestore-repositories";
 import { findContactByPhone } from "./firestore-repositories";
 import { persistOutboundTemplateMessage } from "./conversation-from-outbound";
@@ -21,8 +22,35 @@ import { buildCampaignParametersAsync } from "./campaign-params-server";
 import { resolveHeaderImage } from "./campaign-header-image";
 import { isMessageStatusMoreAdvanced } from "./campaign-status-sync";
 
-function nowTimestamp() {
-  return Timestamp.now();
+/** JSON opcional para escrita no Prisma (undefined = não altera a coluna). */
+function j(value: unknown): Prisma.InputJsonValue | undefined {
+  return value === undefined || value === null
+    ? undefined
+    : (value as Prisma.InputJsonValue);
+}
+
+function jobUpdateData(data: Partial<CampaignJob>): Prisma.CampaignJobUpdateManyMutationInput {
+  return {
+    ...(data.status !== undefined ? { status: data.status } : {}),
+    ...(data.scheduledAt !== undefined
+      ? { scheduledAt: new Date(data.scheduledAt) }
+      : {}),
+    ...(data.attempts !== undefined ? { attempts: data.attempts } : {}),
+    ...(data.lastError !== undefined ? { lastError: data.lastError } : {}),
+    ...(data.whatsappMessageId !== undefined
+      ? { whatsappMessageId: data.whatsappMessageId }
+      : {}),
+    ...(data.deliveryPhone !== undefined
+      ? { deliveryPhone: data.deliveryPhone }
+      : {}),
+    ...(data.messageStatus !== undefined
+      ? { messageStatus: data.messageStatus }
+      : {}),
+    ...(data.contactName !== undefined ? { contactName: data.contactName } : {}),
+    ...(data.parameters !== undefined
+      ? { parameters: data.parameters as Prisma.InputJsonValue }
+      : {}),
+  };
 }
 
 export interface CampaignQueue {
@@ -34,66 +62,109 @@ export interface CampaignQueue {
     campaignId: string,
     limit: number
   ): Promise<CampaignJob[]>;
+  claimPendingJobs(
+    campaignId: string,
+    limit: number
+  ): Promise<CampaignJob[]>;
   updateJob(
     campaignId: string,
     jobId: string,
     data: Partial<CampaignJob>
   ): Promise<void>;
+  updateJobIf(
+    campaignId: string,
+    jobId: string,
+    expectedStatus: CampaignJobStatus,
+    data: Partial<CampaignJob>
+  ): Promise<boolean>;
   incrementCampaignCounters(
     campaignId: string,
     delta: { sent?: number; failed?: number; skipped?: number }
   ): Promise<void>;
 }
 
-class FirestoreCampaignQueue implements CampaignQueue {
+class SqlCampaignQueue implements CampaignQueue {
   async enqueueJobs(
     campaignId: string,
     jobs: Omit<CampaignJob, "id" | "createdAt" | "updatedAt" | "attempts">[]
   ): Promise<void> {
-    const batch = getDb().batch();
-    const col = getDb()
-      .collection("campaigns")
-      .doc(campaignId)
-      .collection("jobs");
+    if (jobs.length === 0) return;
+    const sql = getSql();
+    const campaign = await sql.campaign.findUnique({
+      where: { id: campaignId },
+      select: { companyId: true },
+    });
+    if (!campaign) throw new Error("Campanha não encontrada.");
 
-    for (const job of jobs) {
-      const ref = col.doc();
-      const ts = nowTimestamp();
-      batch.set(ref, {
-        id: ref.id,
-        ...job,
+    await sql.campaignJob.createMany({
+      data: jobs.map((job) => ({
+        campaignId,
+        companyId: campaign.companyId,
+        contactId: job.contactId,
+        phone: job.phone,
+        contactName: job.contactName,
+        parameters: job.parameters as Prisma.InputJsonValue,
+        headerImageStoragePath: job.headerImageStoragePath,
+        headerImageLink: job.headerImageLink,
+        status: job.status,
+        scheduledAt: new Date(job.scheduledAt),
         attempts: 0,
-        createdAt: ts,
-        updatedAt: ts,
-      });
-    }
-
-    await batch.commit();
+        ...(job.whatsappMessageId
+          ? { whatsappMessageId: job.whatsappMessageId }
+          : {}),
+        ...(job.deliveryPhone ? { deliveryPhone: job.deliveryPhone } : {}),
+        ...(job.messageStatus ? { messageStatus: job.messageStatus } : {}),
+        ...(job.lastError ? { lastError: job.lastError } : {}),
+      })),
+    });
   }
 
   async getPendingJobs(
     campaignId: string,
     limit: number
   ): Promise<CampaignJob[]> {
-    const snap = await getDb()
-      .collection("campaigns")
-      .doc(campaignId)
-      .collection("jobs")
-      .where("status", "==", "pending")
-      .get();
+    const rows = await getSql().campaignJob.findMany({
+      where: {
+        campaignId,
+        status: "pending",
+        scheduledAt: { lte: new Date() },
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: limit,
+    });
+    return rows.map(campaignJobFromRow);
+  }
 
-    const jobs = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CampaignJob);
-    const nowMs = Date.now();
-    const due = jobs.filter((job) => {
-      const scheduledMs = job.scheduledAt?.toMillis?.() ?? 0;
-      return scheduledMs <= nowMs;
+  /**
+   * Reserva jobs vencidos de forma atômica (pending → processing): dois
+   * runners simultâneos (cron + ação manual) nunca reservam o mesmo job.
+   */
+  async claimPendingJobs(
+    campaignId: string,
+    limit: number
+  ): Promise<CampaignJob[]> {
+    const sql = getSql();
+    const candidates = await sql.campaignJob.findMany({
+      where: {
+        campaignId,
+        status: "pending",
+        scheduledAt: { lte: new Date() },
+      },
+      orderBy: { scheduledAt: "asc" },
+      take: limit,
     });
-    due.sort((a, b) => {
-      const aMs = a.scheduledAt?.toMillis?.() ?? 0;
-      const bMs = b.scheduledAt?.toMillis?.() ?? 0;
-      return aMs - bMs;
-    });
-    return due.slice(0, limit);
+
+    const claimed: CampaignJob[] = [];
+    for (const row of candidates) {
+      const res = await sql.campaignJob.updateMany({
+        where: { id: row.id, status: "pending" },
+        data: { status: "processing" },
+      });
+      if (res.count === 1) {
+        claimed.push(campaignJobFromRow({ ...row, status: "processing" }));
+      }
+    }
+    return claimed;
   }
 
   async updateJob(
@@ -101,28 +172,75 @@ class FirestoreCampaignQueue implements CampaignQueue {
     jobId: string,
     data: Partial<CampaignJob>
   ): Promise<void> {
-    await getDb()
-      .collection("campaigns")
-      .doc(campaignId)
-      .collection("jobs")
-      .doc(jobId)
-      .update({ ...data, updatedAt: nowTimestamp() });
+    await getSql().campaignJob.updateMany({
+      where: { id: jobId, campaignId },
+      data: jobUpdateData(data),
+    });
+  }
+
+  /** Atualiza só se o job ainda estiver no status esperado (guarda de corrida). */
+  async updateJobIf(
+    campaignId: string,
+    jobId: string,
+    expectedStatus: CampaignJobStatus,
+    data: Partial<CampaignJob>
+  ): Promise<boolean> {
+    const res = await getSql().campaignJob.updateMany({
+      where: { id: jobId, campaignId, status: expectedStatus },
+      data: jobUpdateData(data),
+    });
+    return res.count === 1;
   }
 
   async incrementCampaignCounters(
     campaignId: string,
     delta: { sent?: number; failed?: number; skipped?: number }
   ): Promise<void> {
-    const { FieldValue } = await import("firebase-admin/firestore");
-    const patch: Record<string, unknown> = { updatedAt: nowTimestamp() };
-    if (delta.sent) patch.sentCount = FieldValue.increment(delta.sent);
-    if (delta.failed) patch.failedCount = FieldValue.increment(delta.failed);
-    if (delta.skipped) patch.skippedCount = FieldValue.increment(delta.skipped);
-    await getDb().collection("campaigns").doc(campaignId).update(patch);
+    await getSql().campaign.update({
+      where: { id: campaignId },
+      data: {
+        ...(delta.sent ? { sentCount: { increment: delta.sent } } : {}),
+        ...(delta.failed ? { failedCount: { increment: delta.failed } } : {}),
+        ...(delta.skipped ? { skippedCount: { increment: delta.skipped } } : {}),
+      },
+    });
   }
 }
 
-export const campaignQueue: CampaignQueue = new FirestoreCampaignQueue();
+export const campaignQueue: CampaignQueue = new SqlCampaignQueue();
+
+/**
+ * Total de jobs ainda não resolvidos da campanha, independente de scheduledAt.
+ * Inclui "processing" para não marcar finished enquanto outro runner envia.
+ */
+export async function countPendingJobs(campaignId: string): Promise<number> {
+  return getSql().campaignJob.count({
+    where: { campaignId, status: { in: ["pending", "processing"] } },
+  });
+}
+
+const STALE_PROCESSING_MS = 10 * 60_000;
+
+/**
+ * Jobs presos em "processing" (crash no meio do lote) voltam a "pending"
+ * depois de 10 minutos para serem reprocessados.
+ */
+export async function resetStaleProcessingJobs(
+  campaignId: string
+): Promise<number> {
+  const res = await getSql().campaignJob.updateMany({
+    where: {
+      campaignId,
+      status: "processing",
+      updatedAt: { lt: new Date(Date.now() - STALE_PROCESSING_MS) },
+    },
+    data: {
+      status: "pending",
+      lastError: "Recuperado de processamento interrompido.",
+    },
+  });
+  return res.count;
+}
 
 const MAX_JOB_ATTEMPTS = 3;
 const INTRA_BATCH_DELAY_MS = 250;
@@ -139,62 +257,49 @@ export async function updateCampaignJobMessageStatus(
   whatsappMessageId: string,
   messageStatus: string
 ): Promise<void> {
-  const snap = await getDb()
-    .collectionGroup("jobs")
-    .where("whatsappMessageId", "==", whatsappMessageId)
-    .limit(5)
-    .get();
+  const sql = getSql();
+  const rows = await sql.campaignJob.findMany({
+    where: { whatsappMessageId },
+    take: 5,
+  });
 
-  if (snap.empty) {
+  if (rows.length === 0) {
     console.warn("[campaign-queue] Job não encontrado para whatsappMessageId:", whatsappMessageId);
     return;
   }
 
-  const batch = getDb().batch();
-  for (const doc of snap.docs) {
-    const job = doc.data();
-    if (!isMessageStatusMoreAdvanced(messageStatus, job.messageStatus)) continue;
-    batch.update(doc.ref, {
-      messageStatus,
-      updatedAt: nowTimestamp(),
-      ...(messageStatus === "failed" ? { status: "failed" as CampaignJobStatus } : {}),
+  for (const row of rows) {
+    if (!isMessageStatusMoreAdvanced(messageStatus, row.messageStatus ?? undefined)) {
+      continue;
+    }
+    await sql.campaignJob.update({
+      where: { id: row.id },
+      data: {
+        messageStatus,
+        ...(messageStatus === "failed"
+          ? { status: "failed" satisfies CampaignJobStatus }
+          : {}),
+      },
     });
   }
-  await batch.commit();
 }
 
 export async function cancelPendingJobsForContact(
   contactId: string,
   scope: CompanyScope
 ): Promise<number> {
-  const snap = await getDb()
-    .collectionGroup("jobs")
-    .where("contactId", "==", contactId)
-    .where("status", "==", "pending")
-    .get();
-
-  if (snap.empty) return 0;
-
-  const batch = getDb().batch();
-  let cancelled = 0;
-
-  for (const doc of snap.docs) {
-    const campaignRef = doc.ref.parent.parent;
-    if (!campaignRef) continue;
-    const campaignDoc = await campaignRef.get();
-    const campaign = campaignDoc.data() as Campaign | undefined;
-    if (campaign?.companyId !== scope.companyId) continue;
-
-    batch.update(doc.ref, {
+  const result = await getSql().campaignJob.updateMany({
+    where: {
+      contactId,
+      status: "pending",
+      companyId: scope.companyId,
+    },
+    data: {
       status: "skipped",
       lastError: "Opt-out ou bloqueio do contato.",
-      updatedAt: nowTimestamp(),
-    });
-    cancelled++;
-  }
-
-  if (cancelled > 0) await batch.commit();
-  return cancelled;
+    },
+  });
+  return result.count;
 }
 
 export async function createCampaign(
@@ -204,46 +309,64 @@ export async function createCampaign(
   > & { totalContacts?: number },
   scope: CompanyScope
 ): Promise<Campaign> {
-  const ts = nowTimestamp();
-  const ref = getDb().collection("campaigns").doc();
-  const campaign: Omit<Campaign, "id"> = {
-    ...data,
-    sentCount: 0,
-    failedCount: 0,
-    skippedCount: 0,
-    totalContacts: data.totalContacts ?? 0,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...campaign });
-  return { id: ref.id, ...campaign };
+  const row = await getSql().campaign.create({
+    data: {
+      name: data.name,
+      templateName: data.templateName,
+      templateLanguage: data.templateLanguage,
+      status: data.status,
+      contactListId: data.contactListId,
+      audienceType: data.audienceType,
+      audienceConfig: j(data.audienceConfig),
+      totalContacts: data.totalContacts ?? 0,
+      sentCount: 0,
+      failedCount: 0,
+      skippedCount: 0,
+      maxSendsPerRun: data.maxSendsPerRun,
+      parameterMapping: j(data.parameterMapping),
+      contactOriginId: data.contactOriginId,
+      contactOriginKey: data.contactOriginKey,
+      dispatchMode: data.dispatchMode,
+      cadenceConfig: j(data.cadenceConfig),
+      scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : undefined,
+      scheduledEndAt: data.scheduledEndAt
+        ? new Date(data.scheduledEndAt)
+        : undefined,
+      dailySendLimit: data.dailySendLimit,
+      dailySentDate: data.dailySentDate,
+      dailySentCount: data.dailySentCount,
+      quietHours: j(data.quietHours),
+      duplicatePolicy: data.duplicatePolicy,
+      excludeRecentDays: data.excludeRecentDays,
+      excludeTags: j(data.excludeTags),
+      excludeLeadClasses: j(data.excludeLeadClasses),
+      importStats: j(data.importStats),
+      headerImageAssetId: data.headerImageAssetId,
+      headerImageStoragePath: data.headerImageStoragePath,
+      headerImageMode: data.headerImageMode,
+      headerImageMapping: data.headerImageMapping,
+      companyId: scope.companyId,
+    },
+  });
+  return campaignFromRow(row);
 }
 
 export async function getCampaign(
   id: string,
   scope: CompanyScope
 ): Promise<Campaign | null> {
-  const doc = await getDb().collection("campaigns").doc(id).get();
-  if (!doc.exists) return null;
-  const campaign = { id: doc.id, ...doc.data() } as Campaign;
-  if (campaign.companyId !== scope.companyId) return null;
-  return campaign;
+  const row = await getSql().campaign.findFirst({
+    where: { id, companyId: scope.companyId },
+  });
+  return row ? campaignFromRow(row) : null;
 }
 
 export async function listCampaigns(scope: CompanyScope): Promise<Campaign[]> {
-  const snap = await getDb()
-    .collection("campaigns")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  const campaigns = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Campaign);
-  campaigns.sort((a, b) => {
-    const aMs = a.createdAt?.toMillis?.() ?? 0;
-    const bMs = b.createdAt?.toMillis?.() ?? 0;
-    return bMs - aMs;
+  const rows = await getSql().campaign.findMany({
+    where: { companyId: scope.companyId },
+    orderBy: { createdAt: "desc" },
   });
-  return campaigns;
+  return rows.map(campaignFromRow);
 }
 
 export async function listCampaignJobs(
@@ -253,13 +376,10 @@ export async function listCampaignJobs(
   const campaign = await getCampaign(campaignId, scope);
   if (!campaign) return [];
 
-  const snap = await getDb()
-    .collection("campaigns")
-    .doc(campaignId)
-    .collection("jobs")
-    .get();
-
-  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as CampaignJob);
+  const rows = await getSql().campaignJob.findMany({
+    where: { campaignId },
+  });
+  return rows.map(campaignJobFromRow);
 }
 
 export async function updateCampaignStatus(
@@ -269,9 +389,9 @@ export async function updateCampaignStatus(
 ): Promise<void> {
   const campaign = await getCampaign(id, scope);
   if (!campaign) throw new Error("Campanha não encontrada.");
-  await getDb().collection("campaigns").doc(id).update({
-    status,
-    updatedAt: nowTimestamp(),
+  await getSql().campaign.update({
+    where: { id },
+    data: { status },
   });
 }
 
@@ -308,7 +428,7 @@ export async function enqueueCampaignJobsForContacts(
         : {}),
       ...(headerImage?.link ? { headerImageLink: headerImage.link } : {}),
       status: "pending" as CampaignJobStatus,
-      scheduledAt: Timestamp.fromMillis(schedule[index] ?? Date.now()),
+      scheduledAt: schedule[index] ?? Date.now(),
     });
   }
 
@@ -343,8 +463,8 @@ export async function updateCampaignFields(
       | "headerImageMapping"
     >
   > & {
-    scheduledAt?: Timestamp | null;
-    scheduledEndAt?: Timestamp | null;
+    scheduledAt?: number | null;
+    scheduledEndAt?: number | null;
     excludeRecentDays?: number | null;
   },
   scope: CompanyScope
@@ -355,46 +475,66 @@ export async function updateCampaignFields(
     throw new Error("Apenas campanhas em rascunho podem ser editadas.");
   }
 
-  const { FieldValue } = await import("firebase-admin/firestore");
-  const patch: Record<string, unknown> = { updatedAt: nowTimestamp() };
-  for (const [key, value] of Object.entries(data)) {
-    if (value === undefined) continue;
-    if (key === "scheduledAt" && value === null) {
-      patch.scheduledAt = FieldValue.delete();
-    } else if (key === "scheduledEndAt" && value === null) {
-      patch.scheduledEndAt = FieldValue.delete();
-    } else if (key === "excludeRecentDays" && value === null) {
-      patch.excludeRecentDays = FieldValue.delete();
-    } else {
-      patch[key] = value;
-    }
+  const patch: Prisma.CampaignUpdateInput = {};
+  if (data.name !== undefined) patch.name = data.name;
+  if (data.templateName !== undefined) patch.templateName = data.templateName;
+  if (data.templateLanguage !== undefined) {
+    patch.templateLanguage = data.templateLanguage;
+  }
+  if (data.contactListId !== undefined) patch.contactListId = data.contactListId;
+  if (data.maxSendsPerRun !== undefined) patch.maxSendsPerRun = data.maxSendsPerRun;
+  if (data.parameterMapping !== undefined) {
+    patch.parameterMapping = data.parameterMapping as unknown as Prisma.InputJsonValue;
+  }
+  if (data.contactOriginId !== undefined) patch.contactOriginId = data.contactOriginId;
+  if (data.contactOriginKey !== undefined) {
+    patch.contactOriginKey = data.contactOriginKey;
+  }
+  if (data.totalContacts !== undefined) patch.totalContacts = data.totalContacts;
+  if (data.audienceType !== undefined) patch.audienceType = data.audienceType;
+  if (data.audienceConfig !== undefined) {
+    patch.audienceConfig = data.audienceConfig as unknown as Prisma.InputJsonValue;
+  }
+  if (data.dispatchMode !== undefined) patch.dispatchMode = data.dispatchMode;
+  if (data.cadenceConfig !== undefined) {
+    patch.cadenceConfig = data.cadenceConfig as unknown as Prisma.InputJsonValue;
+  }
+  if (data.dailySendLimit !== undefined) patch.dailySendLimit = data.dailySendLimit;
+  if (data.quietHours !== undefined) {
+    patch.quietHours = data.quietHours as unknown as Prisma.InputJsonValue;
+  }
+  if (data.duplicatePolicy !== undefined) patch.duplicatePolicy = data.duplicatePolicy;
+  if (data.importStats !== undefined) {
+    patch.importStats = data.importStats as unknown as Prisma.InputJsonValue;
+  }
+  if (data.headerImageAssetId !== undefined) {
+    patch.headerImageAssetId = data.headerImageAssetId;
+  }
+  if (data.headerImageStoragePath !== undefined) {
+    patch.headerImageStoragePath = data.headerImageStoragePath;
+  }
+  if (data.headerImageMode !== undefined) patch.headerImageMode = data.headerImageMode;
+  if (data.headerImageMapping !== undefined) {
+    patch.headerImageMapping = data.headerImageMapping;
+  }
+  if (data.scheduledAt !== undefined) {
+    patch.scheduledAt = data.scheduledAt === null ? null : new Date(data.scheduledAt);
+  }
+  if (data.scheduledEndAt !== undefined) {
+    patch.scheduledEndAt =
+      data.scheduledEndAt === null ? null : new Date(data.scheduledEndAt);
+  }
+  if (data.excludeRecentDays !== undefined) {
+    patch.excludeRecentDays = data.excludeRecentDays;
   }
 
-  await getDb().collection("campaigns").doc(id).update(patch);
+  await getSql().campaign.update({ where: { id }, data: patch });
   const updated = await getCampaign(id, scope);
   return updated!;
 }
 
 export async function deleteCampaignJobs(campaignId: string): Promise<void> {
-  const col = getDb()
-    .collection("campaigns")
-    .doc(campaignId)
-    .collection("jobs");
-  const snap = await col.get();
-  if (snap.empty) return;
-
-  // Firestore limita 500 operações por batch.
-  let batch = getDb().batch();
-  let count = 0;
-  for (const doc of snap.docs) {
-    batch.delete(doc.ref);
-    count++;
-    if (count % 450 === 0) {
-      await batch.commit();
-      batch = getDb().batch();
-    }
-  }
-  await batch.commit();
+  await getSql().campaignJob.deleteMany({ where: { campaignId } });
 }
 
 export async function deleteCampaign(
@@ -403,8 +543,8 @@ export async function deleteCampaign(
 ): Promise<boolean> {
   const campaign = await getCampaign(id, scope);
   if (!campaign) return false;
-  await deleteCampaignJobs(id);
-  await getDb().collection("campaigns").doc(id).delete();
+  // Jobs caem por cascade.
+  await getSql().campaign.delete({ where: { id } });
   return true;
 }
 
@@ -415,73 +555,66 @@ export async function duplicateCampaign(
   const original = await getCampaign(id, scope);
   if (!original) throw new Error("Campanha não encontrada.");
 
-  const ts = nowTimestamp();
-  const ref = getDb().collection("campaigns").doc();
-  const copy: Omit<Campaign, "id"> = {
-    name: `${original.name} (cópia)`,
-    templateName: original.templateName,
-    templateLanguage: original.templateLanguage,
-    status: "draft",
-    ...(original.contactListId ? { contactListId: original.contactListId } : {}),
-    ...(original.audienceType ? { audienceType: original.audienceType } : {}),
-    ...(original.audienceConfig ? { audienceConfig: original.audienceConfig } : {}),
-    totalContacts: original.totalContacts || 0,
-    sentCount: 0,
-    failedCount: 0,
-    skippedCount: 0,
-    ...(original.maxSendsPerRun ? { maxSendsPerRun: original.maxSendsPerRun } : {}),
-    ...(original.parameterMapping
-      ? { parameterMapping: original.parameterMapping }
-      : {}),
-    ...(original.contactOriginId
-      ? { contactOriginId: original.contactOriginId }
-      : {}),
-    ...(original.contactOriginKey
-      ? { contactOriginKey: original.contactOriginKey }
-      : {}),
-    ...(original.dispatchMode ? { dispatchMode: original.dispatchMode } : {}),
-    ...(original.cadenceConfig ? { cadenceConfig: original.cadenceConfig } : {}),
-    ...(original.dailySendLimit ? { dailySendLimit: original.dailySendLimit } : {}),
-    ...(original.quietHours ? { quietHours: original.quietHours } : {}),
-    ...(original.duplicatePolicy
-      ? { duplicatePolicy: original.duplicatePolicy }
-      : {}),
-    ...(original.excludeRecentDays
-      ? { excludeRecentDays: original.excludeRecentDays }
-      : {}),
-    ...(original.headerImageAssetId
-      ? { headerImageAssetId: original.headerImageAssetId }
-      : {}),
-    ...(original.headerImageStoragePath
-      ? { headerImageStoragePath: original.headerImageStoragePath }
-      : {}),
-    ...(original.headerImageMode
-      ? { headerImageMode: original.headerImageMode }
-      : {}),
-    ...(original.headerImageMapping
-      ? { headerImageMapping: original.headerImageMapping }
-      : {}),
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...copy });
+  const copy = await createCampaign(
+    {
+      name: `${original.name} (cópia)`,
+      templateName: original.templateName,
+      templateLanguage: original.templateLanguage,
+      status: "draft",
+      ...(original.contactListId ? { contactListId: original.contactListId } : {}),
+      ...(original.audienceType ? { audienceType: original.audienceType } : {}),
+      ...(original.audienceConfig ? { audienceConfig: original.audienceConfig } : {}),
+      totalContacts: original.totalContacts || 0,
+      skippedCount: 0,
+      ...(original.maxSendsPerRun ? { maxSendsPerRun: original.maxSendsPerRun } : {}),
+      ...(original.parameterMapping
+        ? { parameterMapping: original.parameterMapping }
+        : {}),
+      ...(original.contactOriginId
+        ? { contactOriginId: original.contactOriginId }
+        : {}),
+      ...(original.contactOriginKey
+        ? { contactOriginKey: original.contactOriginKey }
+        : {}),
+      ...(original.dispatchMode ? { dispatchMode: original.dispatchMode } : {}),
+      ...(original.cadenceConfig ? { cadenceConfig: original.cadenceConfig } : {}),
+      ...(original.dailySendLimit ? { dailySendLimit: original.dailySendLimit } : {}),
+      ...(original.quietHours ? { quietHours: original.quietHours } : {}),
+      ...(original.duplicatePolicy
+        ? { duplicatePolicy: original.duplicatePolicy }
+        : {}),
+      ...(original.excludeRecentDays
+        ? { excludeRecentDays: original.excludeRecentDays }
+        : {}),
+      ...(original.headerImageAssetId
+        ? { headerImageAssetId: original.headerImageAssetId }
+        : {}),
+      ...(original.headerImageStoragePath
+        ? { headerImageStoragePath: original.headerImageStoragePath }
+        : {}),
+      ...(original.headerImageMode
+        ? { headerImageMode: original.headerImageMode }
+        : {}),
+      ...(original.headerImageMapping
+        ? { headerImageMapping: original.headerImageMapping }
+        : {}),
+    },
+    scope
+  );
 
   // Recria os jobs como pendentes a partir do público original.
-  const jobsSnap = await getDb()
-    .collection("campaigns")
-    .doc(id)
-    .collection("jobs")
-    .get();
+  const jobRows = await getSql().campaignJob.findMany({
+    where: { campaignId: id },
+  });
 
-  if (!jobsSnap.empty) {
-    const jobs = jobsSnap.docs.map((doc) => doc.data() as CampaignJob);
+  if (jobRows.length > 0) {
+    const jobs = jobRows.map(campaignJobFromRow);
     const schedule = buildJobScheduleTimestamps(jobs.length, {
       ...original,
       dispatchMode: original.dispatchMode || "immediate",
     });
     await campaignQueue.enqueueJobs(
-      ref.id,
+      copy.id,
       jobs.map((job, index) => ({
         contactId: job.contactId,
         phone: job.phone,
@@ -492,12 +625,12 @@ export async function duplicateCampaign(
           : {}),
         ...(job.headerImageLink ? { headerImageLink: job.headerImageLink } : {}),
         status: "pending" as CampaignJobStatus,
-        scheduledAt: Timestamp.fromMillis(schedule[index] ?? ts.toMillis()),
+        scheduledAt: schedule[index] ?? Date.now(),
       }))
     );
   }
 
-  return { id: ref.id, ...copy };
+  return copy;
 }
 
 export async function runCampaignBatch(
@@ -512,7 +645,7 @@ export async function runCampaignBatch(
   }
 
   if (campaign.scheduledEndAt) {
-    const endMs = campaign.scheduledEndAt.toMillis?.() ?? 0;
+    const endMs = campaign.scheduledEndAt;
     if (endMs > 0 && Date.now() >= endMs) {
       await updateCampaignStatus(campaignId, "finished", scope);
       return { processed: 0, sent: 0, failed: 0, paused: false };
@@ -546,8 +679,10 @@ export async function runCampaignBatch(
     return { processed: 0, sent: 0, failed: 0, paused: true };
   }
 
+  await resetStaleProcessingJobs(campaignId);
+
   const actualBatch = Math.min(effectiveLimit, check.status.remaining);
-  const jobs = await campaignQueue.getPendingJobs(campaignId, actualBatch);
+  const jobs = await campaignQueue.claimPendingJobs(campaignId, actualBatch);
   const provider = await getWhatsAppProvider(scope.companyId);
 
   let sent = 0;
@@ -559,11 +694,11 @@ export async function runCampaignBatch(
       const phone = normalizePhone(job.phone);
       const existing = await findContactByPhone(phone, scope);
       if (existing?.blocked || existing?.optIn === false) {
-        await campaignQueue.updateJob(campaignId, job.id, {
+        const ok = await campaignQueue.updateJobIf(campaignId, job.id, "processing", {
           status: "skipped" as CampaignJobStatus,
           lastError: "Contato bloqueado ou sem opt-in.",
         });
-        skipped++;
+        if (ok) skipped++;
         continue;
       }
 
@@ -600,16 +735,38 @@ export async function runCampaignBatch(
         trackStats: true,
       });
 
-      await campaignQueue.updateJob(campaignId, job.id, {
+      const ok = await campaignQueue.updateJobIf(campaignId, job.id, "processing", {
         status: "sent",
         whatsappMessageId: result.messageId,
         deliveryPhone,
         messageStatus,
         attempts: job.attempts + 1,
       });
-
-      sent++;
+      if (ok) {
+        sent++;
+      } else {
+        console.warn(
+          "[campaign-queue] Job mudou de status durante o envio (outro runner?):",
+          job.id
+        );
+      }
     } catch (error) {
+      // Empresa sem API configurada: devolve os jobs reservados e pausa a
+      // campanha — não é falha transitória e não deve consumir tentativas.
+      if (error instanceof WhatsAppNotConfiguredError) {
+        await getSql().campaignJob.updateMany({
+          where: { campaignId, status: "processing" },
+          data: { status: "pending", lastError: error.message },
+        });
+        await updateCampaignStatus(campaignId, "paused", scope);
+        await campaignQueue.incrementCampaignCounters(campaignId, {
+          sent,
+          failed,
+          skipped,
+        });
+        return { processed: sent + failed + skipped, sent, failed, paused: true };
+      }
+
       const message =
         error instanceof Error ? error.message : "Erro desconhecido";
       const nextAttempts = job.attempts + 1;
@@ -620,19 +777,19 @@ export async function runCampaignBatch(
           Date.now() + retryDelayMs(nextAttempts),
           campaign.quietHours
         );
-        await campaignQueue.updateJob(campaignId, job.id, {
+        await campaignQueue.updateJobIf(campaignId, job.id, "processing", {
           status: "pending",
           lastError: message,
           attempts: nextAttempts,
-          scheduledAt: Timestamp.fromMillis(retryAt),
+          scheduledAt: retryAt,
         });
       } else {
-        await campaignQueue.updateJob(campaignId, job.id, {
+        const ok = await campaignQueue.updateJobIf(campaignId, job.id, "processing", {
           status: "failed",
           lastError: message,
           attempts: nextAttempts,
         });
-        failed++;
+        if (ok) failed++;
       }
     }
 
@@ -644,20 +801,22 @@ export async function runCampaignBatch(
   await campaignQueue.incrementCampaignCounters(campaignId, { sent, failed, skipped });
 
   if (sent > 0) {
-    const { FieldValue } = await import("firebase-admin/firestore");
-    const patch: Record<string, unknown> = {
-      updatedAt: nowTimestamp(),
-      dailySentCount: FieldValue.increment(sent),
-      dailySentDate: todayKey,
-    };
-    if (campaign.dailySentDate !== todayKey) {
-      patch.dailySentCount = sent;
-    }
-    await getDb().collection("campaigns").doc(campaignId).update(patch);
+    await getSql().campaign.update({
+      where: { id: campaignId },
+      data: {
+        dailySentDate: todayKey,
+        ...(campaign.dailySentDate === todayKey
+          ? { dailySentCount: { increment: sent } }
+          : { dailySentCount: sent }),
+      },
+    });
   }
 
-  const remaining = await campaignQueue.getPendingJobs(campaignId, 1);
-  if (remaining.length === 0) {
+  // Conclusão considera TODOS os pendentes, inclusive agendados para o futuro
+  // (cadência/retry) — getPendingJobs filtra só os vencidos e marcaria
+  // "finished" prematuramente, orfanando os jobs futuros.
+  const remaining = await countPendingJobs(campaignId);
+  if (remaining === 0) {
     await updateCampaignStatus(campaignId, "finished", scope);
     try {
       const { applyAutoClass4ForFinishedCampaign } = await import("./lead-class-auto");

@@ -33,6 +33,7 @@ export async function GET(request: NextRequest) {
       request.nextUrl.searchParams.get("noResponse") === "true";
     const connectionId =
       request.nextUrl.searchParams.get("connectionId") || undefined;
+    const label = request.nextUrl.searchParams.get("label") || undefined;
     let assignedTo = request.nextUrl.searchParams.get("assignedTo") || undefined;
 
     // Membros só veem conversas atribuídas a si, exceto quando filtram
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
             : undefined,
         noResponseOnly,
         connectionId,
+        label,
       }
     );
 

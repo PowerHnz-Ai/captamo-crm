@@ -37,15 +37,7 @@ export async function resolveUserPhotoUrl(
     return await getMediaSignedUrl(user.photoStoragePath);
   } catch (error) {
     console.warn("[user-profiles] Signed URL indisponível, usando proxy:", error);
-    let version: number | undefined;
-    if (
-      user.photoUpdatedAt &&
-      typeof user.photoUpdatedAt === "object" &&
-      "toMillis" in user.photoUpdatedAt
-    ) {
-      version = user.photoUpdatedAt.toMillis();
-    }
-    return buildUserAvatarUrl(user.uid, version);
+    return buildUserAvatarUrl(user.uid, user.photoUpdatedAt);
   }
 }
 
@@ -59,7 +51,7 @@ export async function serializeTeamUserAsync(user: TeamUser) {
     role: user.role,
     jobTitle: user.jobTitle,
     photoStoragePath: user.photoStoragePath,
-    photoUpdatedAt: user.photoUpdatedAt?.toMillis?.() ?? null,
+    photoUpdatedAt: user.photoUpdatedAt ?? null,
     photoUrl,
     active: user.active !== false,
   };

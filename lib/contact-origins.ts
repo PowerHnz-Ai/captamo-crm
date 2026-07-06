@@ -1,26 +1,10 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { Prisma } from "@prisma/client";
+import { getSql } from "./db";
+import { contactOriginFromRow } from "./db-mappers";
 import type { CompanyScope } from "./firestore-repositories";
+import type { ContactOrigin, ContactOriginField, ContactOriginFieldType } from "./types";
 
-export type ContactOriginFieldType = "month" | "text" | "phone" | "contact_ref";
-
-export interface ContactOriginField {
-  key: string;
-  label: string;
-  type: ContactOriginFieldType;
-  required?: boolean;
-}
-
-export interface ContactOrigin {
-  id: string;
-  companyId: string;
-  key: string;
-  label: string;
-  isSystem: boolean;
-  fields: ContactOriginField[];
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
+export type { ContactOrigin, ContactOriginField, ContactOriginFieldType };
 
 const SYSTEM_ORIGINS: Array<
   Pick<ContactOrigin, "key" | "label" | "isSystem" | "fields">
@@ -63,51 +47,44 @@ const SYSTEM_ORIGINS: Array<
   },
 ];
 
-function nowTimestamp() {
-  return Timestamp.now();
-}
-
 export async function seedContactOriginsForCompany(
   scope: CompanyScope
 ): Promise<ContactOrigin[]> {
-  const snap = await getDb()
-    .collection("contact_origins")
-    .where("companyId", "==", scope.companyId)
-    .get();
-
-  if (!snap.empty) {
-    return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as ContactOrigin);
+  const sql = getSql();
+  const existing = await sql.contactOrigin.findMany({
+    where: { companyId: scope.companyId },
+  });
+  if (existing.length > 0) {
+    return existing.map(contactOriginFromRow);
   }
 
   const created: ContactOrigin[] = [];
-  const ts = nowTimestamp();
-
   for (const origin of SYSTEM_ORIGINS) {
-    const ref = getDb().collection("contact_origins").doc();
-    const record: Omit<ContactOrigin, "id"> = {
-      ...origin,
-      companyId: scope.companyId,
-      createdAt: ts,
-      updatedAt: ts,
-    };
-    await ref.set({ id: ref.id, ...record });
-    created.push({ id: ref.id, ...record });
+    const row = await sql.contactOrigin.create({
+      data: {
+        key: origin.key,
+        label: origin.label,
+        isSystem: origin.isSystem,
+        fields: origin.fields as unknown as Prisma.InputJsonValue,
+        companyId: scope.companyId,
+      },
+    });
+    created.push(contactOriginFromRow(row));
   }
 
   return created;
 }
 
 export async function listContactOrigins(scope: CompanyScope): Promise<ContactOrigin[]> {
-  const snap = await getDb()
-    .collection("contact_origins")
-    .where("companyId", "==", scope.companyId)
-    .get();
+  const rows = await getSql().contactOrigin.findMany({
+    where: { companyId: scope.companyId },
+  });
 
-  if (snap.empty) {
+  if (rows.length === 0) {
     return seedContactOriginsForCompany(scope);
   }
 
-  const origins = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as ContactOrigin);
+  const origins = rows.map(contactOriginFromRow);
   origins.sort((a, b) => a.label.localeCompare(b.label, "pt-BR"));
   return origins;
 }
@@ -116,31 +93,27 @@ export async function getContactOriginById(
   id: string,
   scope: CompanyScope
 ): Promise<ContactOrigin | null> {
-  const doc = await getDb().collection("contact_origins").doc(id).get();
-  if (!doc.exists) return null;
-  const origin = { id: doc.id, ...doc.data() } as ContactOrigin;
-  if (origin.companyId !== scope.companyId) return null;
-  return origin;
+  const row = await getSql().contactOrigin.findFirst({
+    where: { id, companyId: scope.companyId },
+  });
+  return row ? contactOriginFromRow(row) : null;
 }
 
 export async function createCustomContactOrigin(
   data: { label: string; fields: ContactOriginField[] },
   scope: CompanyScope
 ): Promise<ContactOrigin> {
-  const ts = nowTimestamp();
   const key = `custom_${Date.now()}`;
-  const ref = getDb().collection("contact_origins").doc();
-  const origin: Omit<ContactOrigin, "id"> = {
-    key,
-    label: data.label,
-    isSystem: false,
-    fields: data.fields,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...origin });
-  return { id: ref.id, ...origin };
+  const row = await getSql().contactOrigin.create({
+    data: {
+      key,
+      label: data.label,
+      isSystem: false,
+      fields: data.fields as unknown as Prisma.InputJsonValue,
+      companyId: scope.companyId,
+    },
+  });
+  return contactOriginFromRow(row);
 }
 
 export async function updateContactOrigin(
@@ -150,21 +123,18 @@ export async function updateContactOrigin(
 ): Promise<ContactOrigin | null> {
   const existing = await getContactOriginById(id, scope);
   if (!existing) return null;
-  if (existing.isSystem && data.fields) {
-    const updated = { ...existing, fields: data.fields, updatedAt: nowTimestamp() };
-    if (existing.key !== "custom") {
-      await getDb().collection("contact_origins").doc(id).update({
-        fields: data.fields,
-        updatedAt: nowTimestamp(),
-      });
-      return updated;
-    }
-  }
 
-  const update: Record<string, unknown> = { updatedAt: nowTimestamp() };
-  if (data.label) update.label = data.label;
-  if (data.fields) update.fields = data.fields;
+  // Origens de sistema (exceto "custom") aceitam apenas alteração de campos.
+  const allowLabel = !existing.isSystem || existing.key === "custom";
 
-  await getDb().collection("contact_origins").doc(id).update(update);
-  return { ...existing, ...data, updatedAt: nowTimestamp() } as ContactOrigin;
+  const row = await getSql().contactOrigin.update({
+    where: { id },
+    data: {
+      ...(data.label && allowLabel ? { label: data.label } : {}),
+      ...(data.fields
+        ? { fields: data.fields as unknown as Prisma.InputJsonValue }
+        : {}),
+    },
+  });
+  return contactOriginFromRow(row);
 }

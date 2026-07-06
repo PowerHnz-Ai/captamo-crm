@@ -1,11 +1,7 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { getSql } from "./db";
+import { dealFromRow, pipelineStageFromRow } from "./db-mappers";
 import type { CompanyScope } from "./firestore-repositories";
-import type { Deal, FunnelEvent, PipelineStage } from "./types";
-
-function nowTimestamp() {
-  return Timestamp.now();
-}
+import type { Deal, PipelineStage } from "./types";
 
 const DEFAULT_STAGES = [
   { name: "Novo", order: 0, color: "#6366f1" },
@@ -18,73 +14,66 @@ const DEFAULT_STAGES = [
 export async function ensureDefaultPipeline(
   scope: CompanyScope
 ): Promise<void> {
-  const snap = await getDb()
-    .collection("pipeline_stages")
-    .where("companyId", "==", scope.companyId)
-    .limit(1)
-    .get();
+  const sql = getSql();
+  const existing = await sql.pipelineStage.findFirst({
+    where: { companyId: scope.companyId },
+    select: { id: true },
+  });
+  if (existing) return;
 
-  if (!snap.empty) return;
-
-  const batch = getDb().batch();
-  for (const stage of DEFAULT_STAGES) {
-    const ref = getDb().collection("pipeline_stages").doc();
-    const ts = nowTimestamp();
-    batch.set(ref, {
-      id: ref.id,
+  await sql.pipelineStage.createMany({
+    data: DEFAULT_STAGES.map((stage) => ({
       ...stage,
       companyId: scope.companyId,
-      createdAt: ts,
-      updatedAt: ts,
-    });
-  }
-  await batch.commit();
+    })),
+  });
 }
 
 export async function listPipelineStages(
   scope: CompanyScope
 ): Promise<PipelineStage[]> {
   await ensureDefaultPipeline(scope);
-  const snap = await getDb()
-    .collection("pipeline_stages")
-    .where("companyId", "==", scope.companyId)
-    .orderBy("order", "asc")
-    .get();
-  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as PipelineStage);
+  const rows = await getSql().pipelineStage.findMany({
+    where: { companyId: scope.companyId },
+    orderBy: { order: "asc" },
+  });
+  return rows.map(pipelineStageFromRow);
 }
 
 export async function listDeals(scope: CompanyScope): Promise<Deal[]> {
-  const snap = await getDb()
-    .collection("deals")
-    .where("companyId", "==", scope.companyId)
-    .orderBy("updatedAt", "desc")
-    .get();
-  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as Deal);
+  const rows = await getSql().deal.findMany({
+    where: { companyId: scope.companyId },
+    orderBy: { updatedAt: "desc" },
+  });
+  return rows.map(dealFromRow);
 }
 
 export async function createDeal(
   data: Pick<Deal, "title" | "contactId" | "stageId" | "value" | "source" | "assignedTo">,
   scope: CompanyScope
 ): Promise<Deal> {
-  const ts = nowTimestamp();
-  const ref = getDb().collection("deals").doc();
-  const deal: Omit<Deal, "id"> = {
-    ...data,
-    companyId: scope.companyId,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-  await ref.set({ id: ref.id, ...deal });
+  const sql = getSql();
+  const row = await sql.deal.create({
+    data: {
+      title: data.title,
+      contactId: data.contactId,
+      stageId: data.stageId,
+      value: data.value,
+      source: data.source,
+      assignedTo: data.assignedTo,
+      companyId: scope.companyId,
+    },
+  });
 
-  await getDb().collection("funnel_events").doc().set({
-    id: ref.id + "_create",
-    dealId: ref.id,
-    toStageId: data.stageId,
-    companyId: scope.companyId,
-    createdAt: ts,
-  } satisfies Omit<FunnelEvent, "id"> & { id: string });
+  await sql.funnelEvent.create({
+    data: {
+      dealId: row.id,
+      toStageId: data.stageId,
+      companyId: scope.companyId,
+    },
+  });
 
-  return { id: ref.id, ...deal };
+  return dealFromRow(row);
 }
 
 export async function moveDealToStage(
@@ -92,37 +81,35 @@ export async function moveDealToStage(
   toStageId: string,
   scope: CompanyScope
 ): Promise<Deal | null> {
-  const doc = await getDb().collection("deals").doc(dealId).get();
-  if (!doc.exists) return null;
-  const deal = { id: doc.id, ...doc.data() } as Deal;
-  if (deal.companyId !== scope.companyId) return null;
+  const sql = getSql();
+  const existing = await sql.deal.findFirst({
+    where: { id: dealId, companyId: scope.companyId },
+  });
+  if (!existing) return null;
 
-  const ts = nowTimestamp();
-  await doc.ref.update({ stageId: toStageId, updatedAt: ts });
-
-  await getDb().collection("funnel_events").doc().set({
-    id: `${dealId}_${Date.now()}`,
-    dealId,
-    fromStageId: deal.stageId,
-    toStageId,
-    companyId: scope.companyId,
-    createdAt: ts,
+  const row = await sql.deal.update({
+    where: { id: dealId },
+    data: { stageId: toStageId },
   });
 
-  return { ...deal, stageId: toStageId, updatedAt: ts };
+  await sql.funnelEvent.create({
+    data: {
+      dealId,
+      fromStageId: existing.stageId,
+      toStageId,
+      companyId: scope.companyId,
+    },
+  });
+
+  return dealFromRow(row);
 }
 
 export async function getDealByContactId(
   contactId: string,
   scope: CompanyScope
 ): Promise<Deal | null> {
-  const snap = await getDb()
-    .collection("deals")
-    .where("companyId", "==", scope.companyId)
-    .where("contactId", "==", contactId)
-    .limit(1)
-    .get();
-  if (snap.empty) return null;
-  const doc = snap.docs[0]!;
-  return { id: doc.id, ...doc.data() } as Deal;
+  const row = await getSql().deal.findFirst({
+    where: { companyId: scope.companyId, contactId },
+  });
+  return row ? dealFromRow(row) : null;
 }

@@ -66,6 +66,23 @@ export async function processNormalizedWebhookEvents(
           continue;
         }
 
+        // Dedup: a Meta reentrega webhooks; se a mensagem já foi salva
+        // (ref por whatsappMessageId), ignora — mesmo padrão do outbound_sync.
+        if (event.messageId) {
+          const existing = await resolveWhatsAppMessageRef(event.messageId);
+          if (existing) {
+            await logWebhookEvent({
+              companyId: scope.companyId,
+              provider,
+              eventType: "inbound_duplicate",
+              phone: event.phone,
+              messageId: event.messageId,
+              status: "processed",
+            });
+            continue;
+          }
+        }
+
         console.log("[webhook] Mensagem inbound", {
           phone: event.phone,
           type: event.messageType,

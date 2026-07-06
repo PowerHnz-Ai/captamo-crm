@@ -3,8 +3,11 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveCompanyContextOrError } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
-import { updateTeamUserSchema } from "@/lib/validators";
+import { updateTeamUserSchema, createTeamMemberSchema } from "@/lib/validators";
 import { serializeTeamUserAsync } from "@/lib/user-profiles";
+import { canAssignRole, canManageUser } from "@/lib/permissions";
+import { isPlatformAdmin } from "@/lib/platform-admin";
+import { getEffectiveRole } from "@/lib/roles";
 
 export async function GET(request: NextRequest) {
   const authResult = await resolveCompanyContextOrError(request);
@@ -25,6 +28,65 @@ export async function GET(request: NextRequest) {
   } catch (error) {
     console.error("[team GET]", error);
     return NextResponse.json({ error: "Erro ao listar equipe." }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  const authResult = await resolveCompanyContextOrError(request);
+  if (!authResult.ok) {
+    return NextResponse.json({ error: authResult.error }, { status: authResult.status });
+  }
+
+  const perm = requirePermission(authResult.context.auth, "team.manage_roles");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
+  }
+
+  try {
+    const body = await request.json();
+    const parsed = createTeamMemberSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Dados inválidos", details: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+
+    const actor = {
+      role: authResult.context.auth!.role,
+      cargo: authResult.context.auth!.cargo,
+      platformAdmin: isPlatformAdmin(authResult.context.auth),
+    };
+
+    // Teto: gerente não cria admin; apenas admin/platform admin criam admin.
+    if (!canAssignRole(actor, parsed.data.role)) {
+      return NextResponse.json(
+        { error: "Você não pode atribuir este cargo." },
+        { status: 403 }
+      );
+    }
+
+    const scope = { companyId: authResult.context.companyId };
+    const { createTeamMember } = await import("@/lib/company-provisioning");
+    const { getTeamUser } = await import("@/lib/lead-assignment");
+
+    const created = await createTeamMember(parsed.data, scope);
+    const user = await getTeamUser(created.uid, scope);
+
+    return NextResponse.json(
+      {
+        ok: true,
+        // e-mail retornado para o cliente disparar sendPasswordResetEmail.
+        email: created.email,
+        user: user ? await serializeTeamUserAsync(user) : null,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    const status = (error as { status?: number }).status ?? 500;
+    const message = error instanceof Error ? error.message : "Erro ao criar usuário.";
+    if (status === 500) console.error("[team POST]", error);
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -63,6 +125,31 @@ export async function PATCH(request: NextRequest) {
     const { updateUserRole, updateUserProfile, getTeamUser } = await import(
       "@/lib/lead-assignment"
     );
+
+    const actor = {
+      role: authResult.context.auth!.role,
+      cargo: authResult.context.auth!.cargo,
+      platformAdmin: isPlatformAdmin(authResult.context.auth),
+    };
+    const target = await getTeamUser(uid, scope);
+    if (!target) {
+      return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
+    }
+
+    // Teto: gerente não altera admins existentes...
+    if (!canManageUser(actor, target)) {
+      return NextResponse.json(
+        { error: "Você não pode alterar este usuário." },
+        { status: 403 }
+      );
+    }
+    // ...nem promove alguém a admin.
+    if (role !== undefined && role !== null && !canAssignRole(actor, role)) {
+      return NextResponse.json(
+        { error: "Você não pode atribuir este cargo." },
+        { status: 403 }
+      );
+    }
 
     if (role !== undefined) {
       await updateUserRole(uid, role, scope);
@@ -115,8 +202,27 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    const { deactivateTeamUser } = await import("@/lib/lead-assignment");
-    await deactivateTeamUser(uid, { companyId: authResult.context.companyId });
+    const scope = { companyId: authResult.context.companyId };
+    const { deactivateTeamUser, getTeamUser } = await import("@/lib/lead-assignment");
+
+    const actor = {
+      role: authResult.context.auth!.role,
+      cargo: authResult.context.auth!.cargo,
+      platformAdmin: isPlatformAdmin(authResult.context.auth),
+    };
+    const target = await getTeamUser(uid, scope);
+    if (!target) {
+      return NextResponse.json({ error: "Usuário não encontrado." }, { status: 404 });
+    }
+    // Teto: gerente não remove admins existentes.
+    if (!canManageUser(actor, target)) {
+      return NextResponse.json(
+        { error: "Você não pode remover este usuário." },
+        { status: 403 }
+      );
+    }
+
+    await deactivateTeamUser(uid, scope);
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error("[team DELETE]", error);

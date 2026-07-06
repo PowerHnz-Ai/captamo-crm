@@ -88,7 +88,7 @@ export function computeJobScheduledAtMs(
     const intervalMs = Math.floor(3_600_000 / perHour);
     rawMs = startMs + index * intervalMs;
   } else if (config.strategy === "spread_until_end") {
-    const endMs = campaign.scheduledEndAt?.toMillis?.() ?? startMs + 86_400_000;
+    const endMs = campaign.scheduledEndAt ?? startMs + 86_400_000;
     const span = Math.max(endMs - startMs, 60_000);
     if (totalContacts <= 1) {
       rawMs = startMs;
@@ -113,7 +113,7 @@ export function buildJobScheduleTimestamps(
   >,
   nowMs = Date.now()
 ): number[] {
-  const startMs = campaign.scheduledAt?.toMillis?.() ?? nowMs;
+  const startMs = campaign.scheduledAt ?? nowMs;
   const timestamps: number[] = [];
 
   for (let i = 0; i < totalContacts; i++) {
@@ -154,7 +154,7 @@ export function estimateCampaignDuration(
 
     if (config?.strategy === "spread_until_end" && campaign.scheduledEndAt) {
       durationMs = Math.max(
-        (campaign.scheduledEndAt.toMillis?.() ?? Date.now()) - Date.now(),
+        campaign.scheduledEndAt - Date.now(),
         0
       );
     } else if (config?.strategy === "per_hour") {

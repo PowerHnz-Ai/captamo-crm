@@ -12,11 +12,12 @@ import type {
   SendResult,
   SendTemplateParams,
   SendTextParams,
+  SendReactionParams,
   TemplateDraft,
   WhatsAppConfig,
   WhatsAppProvider,
 } from "./types";
-import { WhatsAppProviderError } from "./types";
+import { WhatsAppNotConfiguredError, WhatsAppProviderError } from "./types";
 
 const META_TIER_LIMITS: Record<number, number> = {
   0: 250,
@@ -63,9 +64,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   private ensureConfig() {
     if (!this.config.token || !this.config.phoneNumberId) {
-      throw new WhatsAppProviderError(
-        "Configuração Meta incompleta. Defina token e phoneNumberId."
-      );
+      throw new WhatsAppNotConfiguredError();
     }
     return {
       token: this.config.token,
@@ -146,6 +145,27 @@ export class MetaCloudProvider implements WhatsAppProvider {
         to,
         type: "text",
         text: { body: params.body },
+        ...(params.replyToWhatsappMessageId
+          ? { context: { message_id: params.replyToWhatsappMessageId } }
+          : {}),
+      }),
+    });
+    return { messageId: extractMessageId(raw), raw };
+  }
+
+  async sendReaction(params: SendReactionParams): Promise<SendResult> {
+    const { phoneNumberId } = this.ensureConfig();
+    const to = normalizePhone(params.to);
+    const raw = await this.graphRequest(`/${phoneNumberId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "reaction",
+        reaction: {
+          message_id: params.targetWhatsappMessageId,
+          emoji: params.emoji,
+        },
       }),
     });
     return { messageId: extractMessageId(raw), raw };
@@ -303,6 +323,9 @@ export class MetaCloudProvider implements WhatsAppProvider {
       messaging_product: "whatsapp",
       to,
       type: params.type,
+      ...(params.replyToWhatsappMessageId
+        ? { context: { message_id: params.replyToWhatsappMessageId } }
+        : {}),
     };
 
     if (params.type === "image") {

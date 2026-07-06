@@ -1,7 +1,10 @@
 import { differenceInMinutes } from "date-fns";
 import { toDate } from "./conversation-window";
 
-type TimestampLike = { toMillis?: () => number; seconds?: number };
+type TimestampLike =
+  | { toMillis?: () => number; seconds?: number }
+  | number
+  | string;
 
 export function formatFirstResponseTime(
   firstResponseAt?: TimestampLike,

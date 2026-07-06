@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyAuthTokenWithReason, getAuthFailureMessage } from "@/lib/auth-server";
 import { getEffectiveRole } from "@/lib/roles";
 import { resolveUserPhotoUrl } from "@/lib/user-profiles";
+import { isPlatformAdmin } from "@/lib/platform-admin";
 
 export async function GET(request: NextRequest) {
   const { auth, reason } = await verifyAuthTokenWithReason(
@@ -39,6 +40,7 @@ export async function GET(request: NextRequest) {
     role: auth.role,
     cargo: auth.cargo,
     effectiveRole: getEffectiveRole(auth),
+    platformAdmin: isPlatformAdmin(auth),
     photoStoragePath: auth.photoStoragePath,
     photoUrl,
   });

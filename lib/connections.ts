@@ -1,38 +1,68 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
-import type { CompanyWhatsAppDoc } from "./companies";
+import { getSql } from "./db";
+import { connectionFromRow } from "./db-mappers";
+import { decryptSecret } from "./crypto";
 import type { Connection, ConnectionStatus } from "./types";
 import type { ProviderType, WhatsAppConfig } from "./whatsapp/types";
 
-function connectionsCollection(companyId: string) {
-  return getDb().collection("companies").doc(companyId).collection("connections");
-}
-
-/** Resolve a API key a partir do nome da env var guardado em apiKeyRef. */
+/**
+ * Resolve a API key por nome de env var (legado evolution/wasender).
+ * Tokens Meta por empresa ficam criptografados no banco — sem fallback global.
+ */
 export function resolveConnectionApiKey(ref?: string): string | undefined {
   if (!ref) return undefined;
-  const envKey = process.env[ref];
-  if (envKey) return envKey.trim();
-  if (ref === "META_WHATSAPP_TOKEN") return process.env.META_WHATSAPP_TOKEN?.trim();
-  if (ref === "WASENDER_API_KEY") return process.env.WASENDER_API_KEY?.trim();
-  if (ref === "EVOLUTION_API_KEY") return process.env.EVOLUTION_API_KEY?.trim();
-  return ref;
+  return process.env[ref]?.trim() || undefined;
 }
 
-function defaultApiKeyRef(provider: ProviderType): string {
+function defaultApiKeyRef(provider: ProviderType): string | undefined {
   if (provider === "wasender") return "WASENDER_API_KEY";
   if (provider === "evolution") return "EVOLUTION_API_KEY";
-  return "META_WHATSAPP_TOKEN";
+  // meta_cloud: credencial vem do apiKeySecret por empresa, não de env.
+  return undefined;
 }
 
-export function connectionToWhatsAppConfig(connection: Connection): WhatsAppConfig {
-  const apiKey = resolveConnectionApiKey(connection.apiKeyRef);
+function tryDecrypt(companyId: string, encrypted?: string | null): string | undefined {
+  if (!encrypted) return undefined;
+  try {
+    return decryptSecret(encrypted);
+  } catch (error) {
+    console.error(
+      `[connections] falha ao descriptografar credencial de ${companyId}:`,
+      error
+    );
+    return undefined;
+  }
+}
+
+/**
+ * Config efetivo de uma conexão. Token: segredo da conexão → segredo da
+ * empresa (company_settings) → env por apiKeyRef (legado). phoneNumberId e
+ * wabaId: conexão → company_settings. Sem credencial global.
+ */
+export async function resolveConnectionConfig(
+  connection: Connection
+): Promise<WhatsAppConfig> {
+  const sql = getSql();
+  const [connSecret, settings] = await Promise.all([
+    sql.connection.findUnique({
+      where: { id: connection.id },
+      select: { apiKeySecret: true },
+    }),
+    sql.companySettings.findUnique({
+      where: { companyId: connection.companyId },
+      select: { apiKeySecret: true, phoneNumberId: true, wabaId: true },
+    }),
+  ]);
+
+  const apiKey =
+    tryDecrypt(connection.companyId, connSecret?.apiKeySecret) ||
+    tryDecrypt(connection.companyId, settings?.apiKeySecret) ||
+    resolveConnectionApiKey(connection.apiKeyRef);
+
   return {
     provider: connection.provider,
     companyId: connection.companyId,
-    phoneNumberId:
-      connection.phoneNumberId || process.env.META_PHONE_NUMBER_ID?.trim(),
-    wabaId: connection.wabaId || process.env.META_WABA_ID?.trim(),
+    phoneNumberId: connection.phoneNumberId || settings?.phoneNumberId || undefined,
+    wabaId: connection.wabaId || settings?.wabaId || undefined,
     instanceId: connection.instanceId,
     apiKey,
     token: apiKey,
@@ -54,39 +84,37 @@ export async function getConnection(
   companyId: string,
   connectionId: string
 ): Promise<Connection | null> {
-  const doc = await connectionsCollection(companyId).doc(connectionId).get();
-  if (!doc.exists) return null;
-  return { id: doc.id, ...doc.data() } as Connection;
+  const row = await getSql().connection.findFirst({
+    where: { id: connectionId, companyId },
+  });
+  return row ? connectionFromRow(row) : null;
 }
 
 export async function listConnections(
   companyId: string
 ): Promise<Connection[]> {
   await ensureDefaultConnection(companyId);
-  const snap = await connectionsCollection(companyId).orderBy("createdAt", "asc").get();
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Connection);
+  const rows = await getSql().connection.findMany({
+    where: { companyId },
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map(connectionFromRow);
 }
 
 export async function getDefaultConnection(
   companyId: string
 ): Promise<Connection | null> {
-  const snap = await connectionsCollection(companyId)
-    .where("isDefault", "==", true)
-    .limit(1)
-    .get();
-  if (!snap.empty) {
-    const d = snap.docs[0]!;
-    return { id: d.id, ...d.data() } as Connection;
-  }
-  const all = await connectionsCollection(companyId)
-    .orderBy("createdAt", "asc")
-    .limit(1)
-    .get();
-  if (!all.empty) {
-    const d = all.docs[0]!;
-    return { id: d.id, ...d.data() } as Connection;
-  }
-  return null;
+  const sql = getSql();
+  const preferred = await sql.connection.findFirst({
+    where: { companyId, isDefault: true },
+  });
+  if (preferred) return connectionFromRow(preferred);
+
+  const first = await sql.connection.findFirst({
+    where: { companyId },
+    orderBy: { createdAt: "asc" },
+  });
+  return first ? connectionFromRow(first) : null;
 }
 
 export interface CreateConnectionInput {
@@ -105,28 +133,28 @@ export async function createConnection(
   companyId: string,
   input: CreateConnectionInput
 ): Promise<Connection> {
-  const ts = Timestamp.now();
-  const ref = connectionsCollection(companyId).doc();
-  const existing = await connectionsCollection(companyId).limit(1).get();
-  const isFirst = existing.empty;
+  const sql = getSql();
+  const existing = await sql.connection.findFirst({
+    where: { companyId },
+    select: { id: true },
+  });
+  const isFirst = !existing;
 
-  const connection: Omit<Connection, "id"> = {
-    companyId,
-    label: input.label,
-    provider: input.provider,
-    status: input.status || "disconnected",
-    instanceId: input.instanceId,
-    baseUrl: input.baseUrl,
-    apiKeyRef: input.apiKeyRef || defaultApiKeyRef(input.provider),
-    phoneNumberId: input.phoneNumberId,
-    wabaId: input.wabaId,
-    isDefault: input.isDefault ?? isFirst,
-    createdAt: ts,
-    updatedAt: ts,
-  };
-
-  await ref.set({ id: ref.id, ...connection });
-  return { id: ref.id, ...connection };
+  const row = await sql.connection.create({
+    data: {
+      companyId,
+      label: input.label,
+      provider: input.provider,
+      status: input.status || "disconnected",
+      instanceId: input.instanceId,
+      baseUrl: input.baseUrl,
+      apiKeyRef: input.apiKeyRef || defaultApiKeyRef(input.provider),
+      phoneNumberId: input.phoneNumberId,
+      wabaId: input.wabaId,
+      isDefault: input.isDefault ?? isFirst,
+    },
+  });
+  return connectionFromRow(row);
 }
 
 export async function updateConnection(
@@ -134,32 +162,58 @@ export async function updateConnection(
   connectionId: string,
   patch: Partial<Omit<Connection, "id" | "companyId" | "createdAt">>
 ): Promise<void> {
-  await connectionsCollection(companyId)
-    .doc(connectionId)
-    .set({ ...patch, updatedAt: Timestamp.now() }, { merge: true });
+  await getSql().connection.updateMany({
+    where: { id: connectionId, companyId },
+    data: {
+      ...(patch.label !== undefined ? { label: patch.label } : {}),
+      ...(patch.provider !== undefined ? { provider: patch.provider } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.instanceId !== undefined ? { instanceId: patch.instanceId } : {}),
+      ...(patch.phoneNumber !== undefined ? { phoneNumber: patch.phoneNumber } : {}),
+      ...(patch.baseUrl !== undefined ? { baseUrl: patch.baseUrl } : {}),
+      ...(patch.apiKeyRef !== undefined ? { apiKeyRef: patch.apiKeyRef } : {}),
+      ...(patch.phoneNumberId !== undefined
+        ? { phoneNumberId: patch.phoneNumberId }
+        : {}),
+      ...(patch.wabaId !== undefined ? { wabaId: patch.wabaId } : {}),
+      ...(patch.messagingLimitTier !== undefined
+        ? { messagingLimitTier: patch.messagingLimitTier }
+        : {}),
+      ...(patch.dailyCap !== undefined ? { dailyCap: patch.dailyCap } : {}),
+      ...(patch.isDefault !== undefined ? { isDefault: patch.isDefault } : {}),
+    },
+  });
 }
 
 export async function deleteConnection(
   companyId: string,
   connectionId: string
 ): Promise<void> {
-  await connectionsCollection(companyId).doc(connectionId).delete();
+  await getSql().connection.deleteMany({
+    where: { id: connectionId, companyId },
+  });
 }
 
 /**
- * Cria uma conexão default a partir da config legada companies/{id}.whatsapp
+ * Cria uma conexão default a partir da config da empresa (company_settings)
  * caso a empresa ainda não possua nenhuma conexão.
  */
 export async function ensureDefaultConnection(
   companyId: string
 ): Promise<void> {
-  const existing = await connectionsCollection(companyId).limit(1).get();
-  if (!existing.empty) return;
+  const sql = getSql();
+  const existing = await sql.connection.findFirst({
+    where: { companyId },
+    select: { id: true },
+  });
+  if (existing) return;
 
-  const companyDoc = await getDb().collection("companies").doc(companyId).get();
-  const whatsapp = companyDoc.data()?.whatsapp as CompanyWhatsAppDoc | undefined;
+  const settings = await sql.companySettings.findUnique({
+    where: { companyId },
+  });
 
-  const provider: ProviderType = whatsapp?.provider || "meta_cloud";
+  const provider: ProviderType =
+    (settings?.provider as ProviderType | null) || "meta_cloud";
   const label =
     provider === "meta_cloud"
       ? "WhatsApp Principal"
@@ -167,15 +221,19 @@ export async function ensureDefaultConnection(
         ? "Wasender"
         : "Evolution";
 
+  // Sem config da empresa (API ainda não ativada pela equipe), a conexão
+  // nasce desconectada — o envio fica bloqueado até a ativação.
+  const configured = Boolean(settings?.apiKeySecret || settings?.provider);
+
   await createConnection(companyId, {
     label,
     provider,
-    instanceId: whatsapp?.instanceId,
-    baseUrl: whatsapp?.baseUrl,
-    apiKeyRef: whatsapp?.apiKeyRef || defaultApiKeyRef(provider),
-    phoneNumberId: whatsapp?.phoneNumberId,
-    wabaId: whatsapp?.wabaId,
-    status: "connected",
+    instanceId: settings?.instanceId ?? undefined,
+    baseUrl: settings?.baseUrl ?? undefined,
+    apiKeyRef: settings?.apiKeyRef ?? defaultApiKeyRef(provider),
+    phoneNumberId: settings?.phoneNumberId ?? undefined,
+    wabaId: settings?.wabaId ?? undefined,
+    status: configured ? "connected" : "disconnected",
     isDefault: true,
   });
 }
@@ -203,11 +261,8 @@ export async function resolveConnectionByInstanceId(
   companyId: string,
   instanceId: string
 ): Promise<Connection | null> {
-  const snap = await connectionsCollection(companyId)
-    .where("instanceId", "==", instanceId)
-    .limit(1)
-    .get();
-  if (snap.empty) return null;
-  const d = snap.docs[0]!;
-  return { id: d.id, ...d.data() } as Connection;
+  const row = await getSql().connection.findFirst({
+    where: { companyId, instanceId },
+  });
+  return row ? connectionFromRow(row) : null;
 }

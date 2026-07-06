@@ -80,36 +80,27 @@ export async function syncCampaignJobByWhatsappMessageId(
   scope: CompanyScope
 ): Promise<void> {
   const { resolveWhatsAppMessageRef } = await import("./whatsapp-message-refs");
-  const { getDb } = await import("./firebase-admin");
-  const { Timestamp } = await import("firebase-admin/firestore");
+  const { getSql } = await import("./db");
 
   const ref = await resolveWhatsAppMessageRef(whatsappMessageId);
   if (!ref || ref.companyId !== scope.companyId) return;
 
-  const snap = await getDb()
-    .collectionGroup("jobs")
-    .where("whatsappMessageId", "==", whatsappMessageId)
-    .limit(5)
-    .get();
+  const sql = getSql();
+  const rows = await sql.campaignJob.findMany({
+    where: { whatsappMessageId, companyId: scope.companyId },
+    take: 5,
+  });
 
-  if (snap.empty) return;
-
-  const batch = getDb().batch();
-  for (const doc of snap.docs) {
-    const campaignRef = doc.ref.parent.parent;
-    if (!campaignRef) continue;
-    const campaignDoc = await campaignRef.get();
-    const campaign = campaignDoc.data();
-    if (campaign?.companyId !== scope.companyId) continue;
-
-    const job = doc.data();
-    if (!isMessageStatusMoreAdvanced(messageStatus, job.messageStatus)) continue;
-
-    batch.update(doc.ref, {
-      messageStatus,
-      updatedAt: Timestamp.now(),
-      ...(messageStatus === "failed" ? { status: "failed" } : {}),
+  for (const row of rows) {
+    if (!isMessageStatusMoreAdvanced(messageStatus, row.messageStatus ?? undefined)) {
+      continue;
+    }
+    await sql.campaignJob.update({
+      where: { id: row.id },
+      data: {
+        messageStatus,
+        ...(messageStatus === "failed" ? { status: "failed" } : {}),
+      },
     });
   }
-  await batch.commit();
 }

@@ -59,14 +59,23 @@ function getFirebaseApp(): App {
   }
 }
 
-let firestoreInstance: Firestore | null = null;
+// Singleton em globalThis: no dev o webpack pode instanciar este módulo em
+// mais de um chunk, e um segundo settings() no mesmo Firestore lança erro.
+const globalForAdmin = globalThis as unknown as {
+  ultrahubFirestore?: Firestore;
+};
 
 export function getDb(): Firestore {
-  if (!firestoreInstance) {
-    firestoreInstance = getFirestore(getFirebaseApp());
-    firestoreInstance.settings({ ignoreUndefinedProperties: true });
+  if (!globalForAdmin.ultrahubFirestore) {
+    const instance = getFirestore(getFirebaseApp());
+    try {
+      instance.settings({ ignoreUndefinedProperties: true });
+    } catch {
+      // settings já aplicado por outra cópia do módulo (dev/HMR)
+    }
+    globalForAdmin.ultrahubFirestore = instance;
   }
-  return firestoreInstance;
+  return globalForAdmin.ultrahubFirestore;
 }
 
 export function getAdminProjectId(): string {

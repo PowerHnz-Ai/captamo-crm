@@ -1,5 +1,7 @@
-import type { Timestamp } from "firebase-admin/firestore";
 import type { ProviderType } from "./whatsapp/types";
+
+/** Epoch millis — datas serializáveis (antes Timestamp do Firestore). */
+export type DateMillis = number;
 
 export type ConversationStatus = "open" | "closed";
 export type MessageDirection = "inbound" | "outbound";
@@ -12,6 +14,8 @@ export type MessageType =
   | "document"
   | "video"
   | "sticker"
+  /** Nota interna do time — nunca enviada ao contato. */
+  | "note"
   | "unknown";
 export type MessageStatus =
   | "accepted"
@@ -27,7 +31,12 @@ export type TemplateStatus =
   | "rejected"
   | "submitted";
 export type CampaignStatus = "draft" | "running" | "paused" | "finished";
-export type CampaignJobStatus = "pending" | "sent" | "failed" | "skipped";
+export type CampaignJobStatus =
+  | "pending"
+  | "processing"
+  | "sent"
+  | "failed"
+  | "skipped";
 export type CampaignAudienceType =
   | "all"
   | "tags"
@@ -90,8 +99,8 @@ export interface QuickReply {
   scope: QuickReplyScope;
   createdBy?: string;
   sortOrder: number;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export type ContactOriginFieldType = "month" | "text" | "phone" | "contact_ref";
@@ -110,8 +119,8 @@ export interface ContactOrigin {
   label: string;
   isSystem: boolean;
   fields: ContactOriginField[];
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface Contact {
@@ -130,8 +139,8 @@ export interface Contact {
   /** 1=qualificado, 2=interesse futuro, 3=frio ativo, 4=sem interesse, 5=bloqueado */
   leadClass?: number | null;
   companyId?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface ContactList {
@@ -141,8 +150,8 @@ export interface ContactList {
   tagFilter?: string[];
   contactIds?: string[];
   companyId: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface Conversation {
@@ -150,18 +159,20 @@ export interface Conversation {
   contactId: string;
   phone: string;
   status: ConversationStatus;
-  lastMessageAt: Timestamp;
-  lastInboundAt?: Timestamp;
+  lastMessageAt: DateMillis;
+  lastInboundAt?: DateMillis;
   lastMessagePreview?: string;
   unreadCount: number;
   assignedTo?: string;
-  assignedAt?: Timestamp;
-  firstResponseAt?: Timestamp;
+  assignedAt?: DateMillis;
+  firstResponseAt?: DateMillis;
   /** Conexão WhatsApp ativa para envio nesta conversa. */
   connectionId?: string;
+  /** Etiquetas próprias da conversa (ex.: "orçamento", "urgente"). */
+  labels?: string[];
   companyId?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface MessageReplyPreview {
@@ -202,12 +213,12 @@ export interface Message {
   /** Conexão WhatsApp pela qual a mensagem entrou/saiu. */
   connectionId?: string;
   /** Marca de mensagem apagada para todos. */
-  deletedAt?: Timestamp;
+  deletedAt?: DateMillis;
   /** UID do atendente que enviou (mensagens outbound pelo CRM). */
   sentByUid?: string;
   /** Nome do atendente no momento do envio. */
   sentByName?: string;
-  createdAt: Timestamp;
+  createdAt: DateMillis;
 }
 
 export type TemplateHeaderType = "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
@@ -230,8 +241,8 @@ export interface MediaAsset {
   mimeType: string;
   filename: string;
   source: MediaAssetSource;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export type TemplateButton =
@@ -266,11 +277,11 @@ export interface Template {
   provider?: ProviderType;
   metaTemplateId?: string;
   requiresMetaApproval?: boolean;
-  submittedAt?: Timestamp;
-  approvedAt?: Timestamp;
+  submittedAt?: DateMillis;
+  approvedAt?: DateMillis;
   rejectionReason?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface Campaign {
@@ -292,8 +303,8 @@ export interface Campaign {
   contactOriginKey?: string;
   dispatchMode?: CampaignDispatchMode;
   cadenceConfig?: CampaignCadenceConfig;
-  scheduledAt?: Timestamp;
-  scheduledEndAt?: Timestamp;
+  scheduledAt?: DateMillis;
+  scheduledEndAt?: DateMillis;
   dailySendLimit?: number;
   dailySentDate?: string;
   dailySentCount?: number;
@@ -308,8 +319,8 @@ export interface Campaign {
   headerImageMode?: "fixed" | "per_contact";
   headerImageMapping?: string;
   companyId?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface CampaignJob {
@@ -321,14 +332,14 @@ export interface CampaignJob {
   headerImageStoragePath?: string;
   headerImageLink?: string;
   status: CampaignJobStatus;
-  scheduledAt: Timestamp;
+  scheduledAt: DateMillis;
   attempts: number;
   lastError?: string;
   whatsappMessageId?: string;
   deliveryPhone?: string;
   messageStatus?: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface PipelineStage {
@@ -337,8 +348,8 @@ export interface PipelineStage {
   order: number;
   color?: string;
   companyId: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface Deal {
@@ -350,8 +361,8 @@ export interface Deal {
   source?: string;
   assignedTo?: string;
   companyId: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }
 
 export interface FunnelEvent {
@@ -360,7 +371,7 @@ export interface FunnelEvent {
   fromStageId?: string;
   toStageId: string;
   companyId: string;
-  createdAt: Timestamp;
+  createdAt: DateMillis;
 }
 
 export interface IntegrationEvent {
@@ -369,7 +380,7 @@ export interface IntegrationEvent {
   payload: unknown;
   status: "success" | "failed";
   companyId?: string;
-  createdAt: Timestamp;
+  createdAt: DateMillis;
 }
 
 export interface DashboardStats {
@@ -429,7 +440,7 @@ export interface TeamUser {
   jobTitle?: string;
   /** Caminho no Storage (companies/{companyId}/avatars/{uid}/...). */
   photoStoragePath?: string;
-  photoUpdatedAt?: Timestamp;
+  photoUpdatedAt?: DateMillis;
   /** false = removido da empresa (soft delete). */
   active?: boolean;
 }
@@ -472,6 +483,6 @@ export interface Connection {
   dailyCap?: number;
   /** Conexão padrão usada quando a conversa não define uma. */
   isDefault?: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: DateMillis;
+  updatedAt: DateMillis;
 }

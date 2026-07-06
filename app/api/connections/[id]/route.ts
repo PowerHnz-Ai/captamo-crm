@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/api-guard";
 import {
   getConnection,
   deleteConnection,
-  connectionToWhatsAppConfig,
+  resolveConnectionConfig,
 } from "@/lib/connections";
 import { createWhatsAppProvider } from "@/lib/whatsapp";
 
@@ -56,7 +56,7 @@ export async function DELETE(
   if (connection.instanceId) {
     try {
       const provider = createWhatsAppProvider(
-        connectionToWhatsAppConfig(connection)
+        await resolveConnectionConfig(connection)
       );
       if (provider.logout) {
         await provider.logout(connection.instanceId);

@@ -19,6 +19,15 @@ export interface WhatsAppConfig {
 export interface SendTextParams {
   to: string;
   body: string;
+  /** Responde citando esta mensagem (context/quoted no WhatsApp). */
+  replyToWhatsappMessageId?: string;
+}
+
+export interface SendReactionParams {
+  to: string;
+  targetWhatsappMessageId: string;
+  /** Emoji da reação; string vazia remove a reação. */
+  emoji: string;
 }
 
 export interface SendTemplateParams {
@@ -39,6 +48,8 @@ export interface SendMediaParams {
   filename?: string;
   preparedBuffer?: Buffer;
   skipAudioPrep?: boolean;
+  /** Responde citando esta mensagem (context/quoted no WhatsApp). */
+  replyToWhatsappMessageId?: string;
 }
 
 export interface SendResult {
@@ -151,6 +162,8 @@ export interface WhatsAppProvider {
   sendText(params: SendTextParams): Promise<SendResult>;
   sendTemplate(params: SendTemplateParams): Promise<SendResult>;
   sendMedia(params: SendMediaParams): Promise<SendResult>;
+  /** Envia reação a uma mensagem (emoji vazio remove). */
+  sendReaction?(params: SendReactionParams): Promise<SendResult>;
   createTemplate?(
     draft: TemplateDraft
   ): Promise<{ id: string; status: string }>;
@@ -193,5 +206,15 @@ export class WhatsAppProviderError extends Error {
   ) {
     super(message);
     this.name = "WhatsAppProviderError";
+  }
+}
+
+/** Empresa sem credenciais da API — envio bloqueado até a equipe ativar. */
+export class WhatsAppNotConfiguredError extends WhatsAppProviderError {
+  constructor(
+    message = "WhatsApp não configurado para esta conta. Solicite a ativação à equipe Ultra Hub."
+  ) {
+    super(message, 422);
+    this.name = "WhatsAppNotConfiguredError";
   }
 }

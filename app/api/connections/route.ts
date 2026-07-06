@@ -8,7 +8,7 @@ import {
   createConnection,
   listConnections,
   updateConnection,
-  connectionToWhatsAppConfig,
+  resolveConnectionConfig,
 } from "@/lib/connections";
 import { createWhatsAppProvider } from "@/lib/whatsapp";
 import { isEvolutionInstanceAlreadyExistsError } from "@/lib/whatsapp/evolution-provider";
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
   if (isUnofficial) {
     try {
       const innerProvider = createWhatsAppProvider(
-        connectionToWhatsAppConfig(connection)
+        await resolveConnectionConfig(connection)
       );
       if (innerProvider.createInstance && connection.instanceId) {
         try {

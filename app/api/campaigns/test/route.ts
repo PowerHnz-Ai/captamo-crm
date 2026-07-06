@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { resolveCompanyContextOrError } from "@/lib/request-company";
+import { requirePermission } from "@/lib/api-guard";
 import { persistOutboundTemplateMessage } from "@/lib/conversation-from-outbound";
 import { normalizePhone } from "@/lib/whatsapp/phone";
 
@@ -20,6 +21,12 @@ export async function POST(request: NextRequest) {
   const authResult = await resolveCompanyContextOrError(request);
   if (!authResult.ok) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
+  }
+
+  // Envio de teste é envio real (custa dinheiro) — mesma permissão das campanhas.
+  const perm = requirePermission(authResult.context.auth, "campaigns.manage");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
 
   try {

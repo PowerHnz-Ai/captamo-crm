@@ -24,7 +24,8 @@ export function computeJobStats(jobs: CampaignJob[]): CampaignJobStats {
   };
 
   for (const job of jobs) {
-    if (job.status === "pending") stats.pending++;
+    // "processing" conta como pendente: reservado por um runner, ainda sem desfecho.
+    if (job.status === "pending" || job.status === "processing") stats.pending++;
     if (job.status === "skipped") stats.skipped++;
     if (job.status === "failed") stats.failed++;
     if (job.status === "sent") stats.sent++;
@@ -60,6 +61,7 @@ export function campaignStatusLabel(status: Campaign["status"]): string {
 
 export type JobDisplayStatus =
   | "pending"
+  | "processing"
   | "skipped"
   | "failed"
   | "accepted"
@@ -68,6 +70,7 @@ export type JobDisplayStatus =
 
 export function getJobDisplayStatus(job: CampaignJob): JobDisplayStatus {
   if (job.status === "pending") return "pending";
+  if (job.status === "processing") return "processing";
   if (job.status === "skipped") return "skipped";
   if (job.status === "failed") return "failed";
 
@@ -80,6 +83,7 @@ export function getJobDisplayStatus(job: CampaignJob): JobDisplayStatus {
 export function jobStatusLabel(status: JobDisplayStatus): string {
   const map: Record<JobDisplayStatus, string> = {
     pending: "Pendente",
+    processing: "Enviando…",
     skipped: "Ignorado",
     failed: "Falha",
     accepted: "Enviado",
@@ -103,18 +107,8 @@ export function tsToDate(
   value: Campaign["createdAt"] | CampaignJob["updatedAt"] | undefined
 ): Date | null {
   if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
-    return value.toDate();
-  }
-  if (typeof value === "object" && "seconds" in value) {
-    return new Date((value as { seconds: number }).seconds * 1000);
-  }
-  if (typeof value === "string" || typeof value === "number") {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 export function formatPhoneDisplay(phone: string): string {

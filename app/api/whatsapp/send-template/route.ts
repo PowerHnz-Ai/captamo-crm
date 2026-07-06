@@ -7,7 +7,7 @@ import { incrementDailyStats } from "@/lib/stats-daily";
 import { messageSenderFromAuth } from "@/lib/user-profiles";
 import type { Contact } from "@/lib/types";
 import { buildTemplateMessagePayload } from "@/lib/template-message-persist";
-import { WhatsAppProviderError, extractMessageId } from "@/lib/whatsapp";
+import { WhatsAppNotConfiguredError, WhatsAppProviderError, extractMessageId } from "@/lib/whatsapp";
 import { normalizePhone } from "@/lib/whatsapp/phone";
 import { getWhatsAppProvider } from "@/lib/whatsapp";
 import { sendTemplateSchema } from "@/lib/validators";
@@ -185,6 +185,9 @@ export async function POST(request: NextRequest) {
       conversationId: conversation.id,
     });
   } catch (error) {
+    if (error instanceof WhatsAppNotConfiguredError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof WhatsAppProviderError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

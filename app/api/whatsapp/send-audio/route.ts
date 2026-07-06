@@ -12,6 +12,7 @@ import {
   prepareOutboundAudio,
 } from "@/lib/audio-transcode";
 import {
+  WhatsAppNotConfiguredError,
   WhatsAppProviderError,
   extractMessageId,
   getWhatsAppProvider,
@@ -191,6 +192,9 @@ export async function POST(request: NextRequest) {
       mimeType: outboundMime,
     });
   } catch (error) {
+    if (error instanceof WhatsAppNotConfiguredError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof WhatsAppProviderError) {
       console.error("[send-audio] Meta:", error.message, error.details);
       return NextResponse.json({ error: error.message }, { status: 400 });

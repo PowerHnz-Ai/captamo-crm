@@ -1,23 +1,5 @@
-import type { Contact, CampaignJob } from "./types";
+import type { Contact } from "./types";
 import type { CompanyScope } from "./firestore-repositories";
-
-const PARTICIPATION_STATUSES = new Set(["sent", "pending"]);
-
-function jobParticipationMs(job: CampaignJob): number {
-  if (job.status === "sent") {
-    return job.updatedAt?.toMillis?.() ?? job.createdAt?.toMillis?.() ?? 0;
-  }
-  return job.createdAt?.toMillis?.() ?? 0;
-}
-
-function isRelevantCampaign(
-  campaign: { id: string; createdAt?: { toMillis?: () => number }; status?: string },
-  cutoffMs: number
-): boolean {
-  const createdMs = campaign.createdAt?.toMillis?.() ?? 0;
-  if (createdMs >= cutoffMs) return true;
-  return campaign.status === "running" || campaign.status === "paused";
-}
 
 export async function getRecentlyTargetedContactIds(
   scope: CompanyScope,
@@ -27,31 +9,41 @@ export async function getRecentlyTargetedContactIds(
   if (days < 1) return new Set();
 
   const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
-  const { listCampaigns } = await import("./campaign-queue");
-  const { getDb } = await import("./firebase-admin");
+  const cutoff = new Date(cutoffMs);
+  const { getSql } = await import("./db");
 
-  const campaigns = await listCampaigns(scope);
+  const rows = await getSql().campaignJob.findMany({
+    where: {
+      companyId: scope.companyId,
+      status: { in: ["sent", "pending", "processing"] },
+      ...(options?.excludeCampaignId
+        ? { campaignId: { not: options.excludeCampaignId } }
+        : {}),
+      // Campanhas antigas e inativas não contam como participação recente.
+      campaign: {
+        OR: [
+          { createdAt: { gte: cutoff } },
+          { status: { in: ["running", "paused"] } },
+        ],
+      },
+    },
+    select: {
+      contactId: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
   const contactIds = new Set<string>();
-
-  for (const campaign of campaigns) {
-    if (options?.excludeCampaignId && campaign.id === options.excludeCampaignId) {
-      continue;
-    }
-    if (!isRelevantCampaign(campaign, cutoffMs)) continue;
-
-    const snap = await getDb()
-      .collection("campaigns")
-      .doc(campaign.id)
-      .collection("jobs")
-      .get();
-
-    for (const doc of snap.docs) {
-      const job = doc.data() as CampaignJob;
-      if (!PARTICIPATION_STATUSES.has(job.status)) continue;
-      if (!job.contactId) continue;
-      if (jobParticipationMs(job) < cutoffMs) continue;
-      contactIds.add(job.contactId);
-    }
+  for (const job of rows) {
+    const participationMs =
+      job.status === "sent"
+        ? (job.updatedAt ?? job.createdAt).getTime()
+        : job.createdAt.getTime();
+    if (participationMs < cutoffMs) continue;
+    if (!job.contactId) continue;
+    contactIds.add(job.contactId);
   }
 
   return contactIds;

@@ -1,6 +1,7 @@
 import { Timestamp, FieldValue, type DocumentSnapshot } from "firebase-admin/firestore";
 import { getAssignmentSettings, setLastRoundRobinUid } from "./assignment-settings";
 import { getDb } from "./firebase-admin";
+import { getSql } from "./db";
 import type { CompanyScope } from "./firestore-repositories";
 import { getConversationById } from "./firestore-repositories";
 import { getEffectiveRole, normalizeRole } from "./roles";
@@ -9,10 +10,20 @@ import type { TeamUser, UserRole } from "./types";
 
 export type { TeamUser };
 
+// Usuários continuam no Firestore (compartilhados com Auth e o Task Checklist);
+// conversas vivem no MariaDB.
 function mapTeamUserDoc(doc: DocumentSnapshot): TeamUser {
-  const data = doc.data() as TeamUser & { companyId?: string };
+  const data = doc.data() as Omit<TeamUser, "photoUpdatedAt"> & {
+    companyId?: string;
+    photoUpdatedAt?: { toMillis?: () => number };
+  };
   const role = getEffectiveRole(data);
-  return { ...data, uid: doc.id, role };
+  return {
+    ...data,
+    uid: doc.id,
+    role,
+    photoUpdatedAt: data.photoUpdatedAt?.toMillis?.(),
+  };
 }
 
 export async function listAttendants(scope: CompanyScope): Promise<TeamUser[]> {
@@ -155,22 +166,16 @@ async function countOpenAssignedConversations(
   scope: CompanyScope,
   windowDays: number
 ): Promise<number> {
-  const cutoff = Timestamp.fromMillis(
-    Date.now() - windowDays * 24 * 60 * 60 * 1000
-  );
+  const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
 
-  const snap = await getDb()
-    .collection("conversations")
-    .where("companyId", "==", scope.companyId)
-    .where("assignedTo", "==", attendantUid)
-    .where("status", "==", "open")
-    .get();
-
-  return snap.docs.filter((doc) => {
-    const data = doc.data() as { lastInboundAt?: Timestamp };
-    if (!data.lastInboundAt) return false;
-    return data.lastInboundAt.toMillis() >= cutoff.toMillis();
-  }).length;
+  return getSql().conversation.count({
+    where: {
+      companyId: scope.companyId,
+      assignedTo: attendantUid,
+      status: "open",
+      lastInboundAt: { gte: cutoff },
+    },
+  });
 }
 
 function filterEligibleAttendants(
@@ -252,17 +257,14 @@ export async function tryAssignOnInbound(
   const bestUid = await pickAssignee(attendants, scope, settings);
   if (!bestUid) return conversation.assignedTo || null;
 
-  const ts = Timestamp.now();
-  const update: Record<string, unknown> = {
-    assignedTo: bestUid,
-    assignedAt: ts,
-    updatedAt: ts,
-  };
-  if (conversation.status === "closed") {
-    update.status = "open";
-  }
-
-  await getDb().collection("conversations").doc(conversationId).update(update);
+  await getSql().conversation.update({
+    where: { id: conversationId },
+    data: {
+      assignedTo: bestUid,
+      assignedAt: new Date(),
+      ...(conversation.status === "closed" ? { status: "open" } : {}),
+    },
+  });
 
   if (settings.strategy === "round_robin") {
     await setLastRoundRobinUid(scope.companyId, bestUid);

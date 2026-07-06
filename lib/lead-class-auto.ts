@@ -1,4 +1,3 @@
-import type { CampaignJob } from "./types";
 import type { CompanyScope } from "./firestore-repositories";
 
 /**
@@ -9,23 +8,20 @@ export async function applyAutoClass4ForFinishedCampaign(
   campaignId: string,
   scope: CompanyScope
 ): Promise<{ updated: number; skipped: number }> {
-  const { getDb } = await import("./firebase-admin");
+  const { getSql } = await import("./db");
   const { getContactById, updateContact, findConversationByPhone } = await import(
     "./firestore-repositories"
   );
 
-  const jobsSnap = await getDb()
-    .collection("campaigns")
-    .doc(campaignId)
-    .collection("jobs")
-    .where("status", "==", "sent")
-    .get();
+  const jobs = await getSql().campaignJob.findMany({
+    where: { campaignId, status: "sent" },
+    select: { contactId: true, phone: true, createdAt: true, updatedAt: true },
+  });
 
   let updated = 0;
   let skipped = 0;
 
-  for (const doc of jobsSnap.docs) {
-    const job = doc.data() as CampaignJob;
+  for (const job of jobs) {
     if (!job.contactId) {
       skipped++;
       continue;
@@ -42,9 +38,9 @@ export async function applyAutoClass4ForFinishedCampaign(
       continue;
     }
 
-    const sentMs = job.updatedAt?.toMillis?.() ?? job.createdAt?.toMillis?.() ?? 0;
+    const sentMs = (job.updatedAt ?? job.createdAt).getTime();
     const conversation = await findConversationByPhone(job.phone, scope);
-    const lastInboundMs = conversation?.lastInboundAt?.toMillis?.() ?? 0;
+    const lastInboundMs = conversation?.lastInboundAt ?? 0;
     const responded = lastInboundMs > sentMs;
 
     if (responded) {

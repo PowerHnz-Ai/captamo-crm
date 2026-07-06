@@ -93,15 +93,14 @@ export async function POST(request: NextRequest) {
 
     const scope = { companyId: authResult.context.companyId };
     const { createMediaAsset } = await import("@/lib/media-asset-repositories");
-    const { getDb } = await import("@/lib/firebase-admin");
 
-    const assetRef = getDb().collection("media_assets").doc();
+    const assetId = crypto.randomUUID().replace(/-/g, "");
     const buffer = Buffer.from(await file.arrayBuffer());
     const filename = file.name || "image.jpg";
 
     const uploaded = await uploadMediaLibraryAsset({
       companyId: scope.companyId,
-      assetId: assetRef.id,
+      assetId,
       buffer,
       mimeType,
       filename,
@@ -118,7 +117,7 @@ export async function POST(request: NextRequest) {
           : "manual",
       },
       scope,
-      assetRef.id
+      assetId
     );
 
     return NextResponse.json({

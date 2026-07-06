@@ -1,7 +1,6 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { Timestamp } from "firebase-admin/firestore";
 import { resolveCompanyContext } from "@/lib/request-company";
 import { getWhatsAppProvider } from "@/lib/whatsapp";
 
@@ -27,7 +26,7 @@ export async function POST(
 
     if (!template.requiresMetaApproval) {
       await updateTemplateStatus(id, "approved", {
-        approvedAt: Timestamp.now(),
+        approvedAt: Date.now(),
       });
       return NextResponse.json({ success: true, status: "approved" });
     }
@@ -53,7 +52,7 @@ export async function POST(
 
     await updateTemplateStatus(id, "pending", {
       metaTemplateId: result.id,
-      submittedAt: Timestamp.now(),
+      submittedAt: Date.now(),
     });
 
     return NextResponse.json({ success: true, ...result });

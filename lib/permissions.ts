@@ -63,6 +63,7 @@ const MATRIX: Record<UserRole, Permission[]> = {
     "reports.view",
     "team.view",
     "team.view_online",
+    "team.manage_roles",
     "origins.manage",
     "lists.manage",
     "contacts.read",
@@ -131,6 +132,38 @@ export function canViewOnlinePresence(ctx: RoleContext): boolean {
 
 export function canManageTeamRoles(ctx: RoleContext): boolean {
   return can(ctx, "team.manage_roles");
+}
+
+/**
+ * Teto de promoção: quem pode conceder qual papel.
+ * - admin (ou platform admin): qualquer papel, inclusive admin.
+ * - gerente: até gerente (member | leader | gerente); nunca admin.
+ * - demais papéis: nenhum.
+ */
+export function canAssignRole(
+  actor: RoleContext & { platformAdmin?: boolean },
+  targetRole: UserRole
+): boolean {
+  if (actor.platformAdmin) return true;
+  const actorRole = getEffectiveRole(actor);
+  if (actorRole === "admin") return true;
+  if (actorRole === "gerente") return targetRole !== "admin";
+  return false;
+}
+
+/**
+ * Um gerente não pode editar/remover/redefinir senha de um admin (protege os
+ * já criados). Admin e platform admin podem gerenciar qualquer usuário.
+ */
+export function canManageUser(
+  actor: RoleContext & { platformAdmin?: boolean },
+  target: RoleContext
+): boolean {
+  if (actor.platformAdmin) return true;
+  const actorRole = getEffectiveRole(actor);
+  if (actorRole === "admin") return true;
+  if (actorRole === "gerente") return getEffectiveRole(target) !== "admin";
+  return false;
 }
 
 export function canReadConversationContent(ctx: RoleContext): boolean {

@@ -27,6 +27,10 @@ export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
     const target = await resolveWebhookTarget("meta", payload);
+    if (!target) {
+      // Número não pertence a nenhuma empresa: 200 para a Meta não reenviar.
+      return NextResponse.json({ success: true, ignored: true });
+    }
     companyId = target.companyId;
     const provider = await getWhatsAppProvider(companyId, target.connectionId);
     const events = provider.parseWebhook(payload, request.headers);

@@ -6,7 +6,11 @@ import { resolveCompanyContext } from "@/lib/request-company";
 import { incrementDailyStats } from "@/lib/stats-daily";
 import { applySenderNameToOutboundBody, userChatSignatureName } from "@/lib/user-display";
 import { messageSenderFromAuth } from "@/lib/user-profiles";
-import { WhatsAppProviderError, extractMessageId } from "@/lib/whatsapp";
+import {
+  WhatsAppNotConfiguredError,
+  WhatsAppProviderError,
+  extractMessageId,
+} from "@/lib/whatsapp";
 import { normalizePhone } from "@/lib/whatsapp/phone";
 import { getWhatsAppProvider } from "@/lib/whatsapp";
 import { sendTextSchema } from "@/lib/validators";
@@ -28,7 +32,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { to, body: textBody, includeSenderName } = parsed.data;
+    const { to, body: textBody, includeSenderName, retryMessageId, replyToMessageId } =
+      parsed.data;
     const phone = normalizePhone(to);
     const scope = { companyId: context.companyId };
     const senderName = context.auth ? userChatSignatureName(context.auth) : "";
@@ -44,6 +49,8 @@ export async function POST(request: NextRequest) {
       ensureConversationConnection,
       isConversationWindowOpen,
       saveOutboundMessage,
+      updateMessageAfterResend,
+      getConversationMessage,
     } = await import("@/lib/firestore-repositories");
 
     const existing = await findContactByPhone(phone, scope);
@@ -83,28 +90,109 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Reply/citação: resolve a mensagem citada e monta a prévia persistida.
+    let replyTo;
+    if (replyToMessageId) {
+      const target = await getConversationMessage(
+        conversation.id,
+        replyToMessageId,
+        scope
+      );
+      if (target) {
+        const { buildReplyPreview } = await import("@/lib/message-reply-preview");
+        const senderLabel =
+          target.direction === "inbound"
+            ? contact.name || conversation.phone
+            : target.sentByName || "Você";
+        replyTo = buildReplyPreview(target, senderLabel);
+      }
+    }
+
     const provider = await getWhatsAppProvider(
       context.companyId,
       conversation.connectionId
     );
-    const result = await provider.sendText({ to: phone, body: outboundBody });
 
-    await saveOutboundMessage({
-      contactId: contact.id,
-      conversationId: conversation.id,
-      whatsappMessageId: result.messageId || extractMessageId(result.raw),
-      type: "text",
-      body: textBody,
-      status: "accepted",
-      connectionId: conversation.connectionId,
-      rawPayload: result.raw,
-      ...messageSenderFromAuth(context.auth),
-    });
+    let result;
+    try {
+      result = await provider.sendText({
+        to: phone,
+        body: outboundBody,
+        replyToWhatsappMessageId: replyTo?.whatsappMessageId,
+      });
+    } catch (sendError) {
+      // Conta sem API configurada: erro claro, sem bolha "falhou" (não é
+      // uma falha transitória que o reenvio resolva).
+      if (sendError instanceof WhatsAppNotConfiguredError) {
+        return NextResponse.json({ error: sendError.message }, { status: 422 });
+      }
+      // Persiste a falha para o atendente ver a bolha "falhou" e poder reenviar.
+      const reason =
+        sendError instanceof Error ? sendError.message : "Falha no provedor.";
+      if (retryMessageId) {
+        await updateMessageAfterResend(conversation.id, retryMessageId, {
+          status: "failed",
+          statusError: reason,
+        });
+      } else {
+        await saveOutboundMessage({
+          contactId: contact.id,
+          conversationId: conversation.id,
+          type: "text",
+          body: textBody,
+          status: "failed",
+          statusError: reason,
+          replyTo,
+          connectionId: conversation.connectionId,
+          ...messageSenderFromAuth(context.auth),
+        });
+      }
+      const status = sendError instanceof WhatsAppProviderError ? 400 : 502;
+      return NextResponse.json({ error: reason }, { status });
+    }
+
+    const whatsappId = result.messageId || extractMessageId(result.raw);
+
+    if (retryMessageId) {
+      await updateMessageAfterResend(conversation.id, retryMessageId, {
+        whatsappMessageId: whatsappId,
+        status: "accepted",
+        rawPayload: result.raw,
+        statusError: null,
+      });
+      if (whatsappId) {
+        const { saveWhatsAppMessageRef } = await import(
+          "@/lib/whatsapp-message-refs"
+        );
+        await saveWhatsAppMessageRef({
+          whatsappMessageId: whatsappId,
+          companyId: context.companyId,
+          conversationId: conversation.id,
+          messageId: retryMessageId,
+        });
+      }
+    } else {
+      await saveOutboundMessage({
+        contactId: contact.id,
+        conversationId: conversation.id,
+        whatsappMessageId: whatsappId,
+        type: "text",
+        body: textBody,
+        status: "accepted",
+        replyTo,
+        connectionId: conversation.connectionId,
+        rawPayload: result.raw,
+        ...messageSenderFromAuth(context.auth),
+      });
+    }
 
     await incrementDailyStats(context.companyId, { messagesSent: 1 });
 
     return NextResponse.json({ success: true, messageId: result.messageId });
   } catch (error) {
+    if (error instanceof WhatsAppNotConfiguredError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof WhatsAppProviderError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

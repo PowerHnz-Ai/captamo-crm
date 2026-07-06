@@ -16,6 +16,9 @@ export const sendTextSchema = z.object({
   to: z.string().min(10),
   body: z.string().min(1).max(4096),
   includeSenderName: z.boolean().optional(),
+  retryMessageId: z.string().min(1).optional(),
+  /** Responde citando esta mensagem (id interno da mensagem). */
+  replyToMessageId: z.string().min(1).optional(),
 });
 
 export const sendMediaSchema = z.object({
@@ -27,6 +30,8 @@ export const sendMediaSchema = z.object({
   filename: z.string().max(200).optional(),
   retryMessageId: z.string().min(1).optional(),
   includeSenderName: z.boolean().optional(),
+  /** Responde citando esta mensagem (id interno da mensagem). */
+  replyToMessageId: z.string().min(1).optional(),
 });
 
 export const createQuickReplySchema = z.object({
@@ -301,6 +306,25 @@ export const updateTeamUserSchema = z.object({
   name: z.string().min(1).max(120).optional(),
   username: z.string().min(1).max(40).nullable().optional(),
   jobTitle: z.string().max(80).nullable().optional(),
+});
+
+export const createTeamMemberSchema = z.object({
+  name: z.string().min(1).max(120),
+  email: z.string().email().max(160),
+  role: z.enum(["admin", "gerente", "leader", "member"]),
+});
+
+export const createClientSchema = z.object({
+  companyName: z.string().min(1).max(160),
+  managerName: z.string().min(1).max(120),
+  managerEmail: z.string().email().max(160),
+});
+
+/** Credenciais da API oficial por clínica (só platform admin). */
+export const platformWhatsappConfigSchema = z.object({
+  token: z.string().min(20).max(1000),
+  phoneNumberId: z.string().min(5).max(64),
+  wabaId: z.string().min(5).max(64),
 });
 
 export const updateProfileSchema = z.object({

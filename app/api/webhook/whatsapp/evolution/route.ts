@@ -11,6 +11,9 @@ export async function POST(request: NextRequest) {
   try {
     const payload = await request.json();
     const target = await resolveWebhookTarget("evolution", payload);
+    if (!target) {
+      return NextResponse.json({ success: true, ignored: true });
+    }
     companyId = target.companyId;
     const provider = await getWhatsAppProvider(companyId, target.connectionId);
     const events = provider.parseWebhook(payload, request.headers);

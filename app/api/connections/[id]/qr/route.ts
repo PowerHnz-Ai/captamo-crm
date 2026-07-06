@@ -6,7 +6,7 @@ import { requirePermission } from "@/lib/api-guard";
 import {
   getConnection,
   updateConnection,
-  connectionToWhatsAppConfig,
+  resolveConnectionConfig,
 } from "@/lib/connections";
 import { createWhatsAppProvider } from "@/lib/whatsapp";
 import type { WhatsAppProvider } from "@/lib/whatsapp/types";
@@ -62,7 +62,7 @@ export async function GET(
 
   try {
     const provider = createWhatsAppProvider(
-      connectionToWhatsAppConfig(connection)
+      await resolveConnectionConfig(connection)
     );
     if (!provider.getConnectionState || !provider.getQrCode) {
       return NextResponse.json(

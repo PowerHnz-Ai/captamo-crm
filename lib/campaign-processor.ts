@@ -1,4 +1,4 @@
-import { getDb } from "./firebase-admin";
+import { getSql } from "./db";
 import type { CompanyScope } from "./firestore-repositories";
 import {
   getCampaign,
@@ -22,8 +22,7 @@ export async function processRunningCampaigns(
   const due = campaigns
     .filter((c) => {
       if (!c.scheduledAt) return true;
-      const ms = c.scheduledAt.toMillis?.() ?? 0;
-      return ms <= Date.now();
+      return c.scheduledAt <= Date.now();
     })
     .slice(0, MAX_CAMPAIGNS_PER_TICK);
 
@@ -49,17 +48,42 @@ export async function processRunningCampaigns(
 }
 
 export async function processAllCompaniesRunningCampaigns(): Promise<void> {
-  const snap = await getDb().collection("campaigns").where("status", "==", "running").get();
-  const companyIds = [
-    ...new Set(
-      snap.docs
-        .map((doc) => (doc.data() as { companyId?: string }).companyId)
-        .filter((id): id is string => Boolean(id))
-    ),
-  ];
+  const sql = getSql();
 
-  for (const companyId of companyIds) {
-    await processRunningCampaigns({ companyId });
+  // Auto-start: rascunhos agendados cujo horário venceu passam a "running".
+  const dueScheduled = await sql.campaign.findMany({
+    where: { status: "draft", scheduledAt: { lte: new Date() } },
+    select: { id: true, companyId: true },
+  });
+  for (const campaign of dueScheduled) {
+    try {
+      await scheduleCampaignIfDue(campaign.id, { companyId: campaign.companyId });
+    } catch (error) {
+      console.error(
+        "[campaign-processor] auto-start falhou",
+        { campaignId: campaign.id, companyId: campaign.companyId },
+        error
+      );
+    }
+  }
+
+  const rows = await sql.campaign.findMany({
+    where: { status: "running" },
+    select: { companyId: true },
+    distinct: ["companyId"],
+  });
+
+  // Erro em uma empresa não pode abortar o tick das demais.
+  for (const row of rows) {
+    try {
+      await processRunningCampaigns({ companyId: row.companyId });
+    } catch (error) {
+      console.error(
+        "[campaign-processor] empresa falhou no tick",
+        { companyId: row.companyId },
+        error
+      );
+    }
   }
 }
 
@@ -70,8 +94,7 @@ export async function scheduleCampaignIfDue(
   const campaign = await getCampaign(campaignId, scope);
   if (!campaign || campaign.status !== "draft") return false;
   if (!campaign.scheduledAt) return false;
-  const ms = campaign.scheduledAt.toMillis?.() ?? 0;
-  if (ms > Date.now()) return false;
+  if (campaign.scheduledAt > Date.now()) return false;
   await updateCampaignStatus(campaignId, "running", scope);
   await runCampaignBatches(campaignId, scope);
   return true;

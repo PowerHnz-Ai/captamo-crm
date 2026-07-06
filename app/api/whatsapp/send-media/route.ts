@@ -8,7 +8,7 @@ import { assertCompanyMediaPath, getMediaSignedUrl } from "@/lib/media-storage";
 import { incrementDailyStats } from "@/lib/stats-daily";
 import { applySenderNameToOutboundBody, userChatSignatureName } from "@/lib/user-display";
 import { messageSenderFromAuth } from "@/lib/user-profiles";
-import { WhatsAppProviderError, extractMessageId, getWhatsAppProvider } from "@/lib/whatsapp";
+import { WhatsAppNotConfiguredError, WhatsAppProviderError, extractMessageId, getWhatsAppProvider } from "@/lib/whatsapp";
 import { normalizePhone } from "@/lib/whatsapp/phone";
 import { sendMediaSchema } from "@/lib/validators";
 
@@ -33,8 +33,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { to, type, storagePath, mimeType, caption, filename, retryMessageId, includeSenderName } =
-      parsed.data;
+    const {
+      to,
+      type,
+      storagePath,
+      mimeType,
+      caption,
+      filename,
+      retryMessageId,
+      includeSenderName,
+      replyToMessageId,
+    } = parsed.data;
     const phone = normalizePhone(to);
     const scope = { companyId: authResult.context.companyId };
     const senderName = authResult.context.auth
@@ -55,6 +64,7 @@ export async function POST(request: NextRequest) {
       isConversationWindowOpen,
       saveOutboundMessage,
       updateMessageAfterResend,
+      getConversationMessage,
     } = await import("@/lib/firestore-repositories");
 
     const existing = await findContactByPhone(phone, scope);
@@ -98,6 +108,24 @@ export async function POST(request: NextRequest) {
       return undefined;
     });
 
+    // Reply/citação: resolve a mensagem citada e monta a prévia persistida.
+    let replyTo;
+    if (replyToMessageId) {
+      const target = await getConversationMessage(
+        conversation.id,
+        replyToMessageId,
+        scope
+      );
+      if (target) {
+        const { buildReplyPreview } = await import("@/lib/message-reply-preview");
+        const senderLabel =
+          target.direction === "inbound"
+            ? contact.name || conversation.phone
+            : target.sentByName || "Você";
+        replyTo = buildReplyPreview(target, senderLabel);
+      }
+    }
+
     const provider = await getWhatsAppProvider(
       scope.companyId,
       conversation.connectionId
@@ -111,6 +139,7 @@ export async function POST(request: NextRequest) {
       caption: outboundCaption,
       filename,
       skipAudioPrep: type === "audio" && /mpeg|mp3|ogg|opus/i.test(mimeType),
+      replyToWhatsappMessageId: replyTo?.whatsappMessageId,
     });
 
     const bodyText =
@@ -133,6 +162,7 @@ export async function POST(request: NextRequest) {
         type,
         body: bodyText,
         status: "accepted",
+        replyTo,
         media: {
           storagePath,
           ...(signedUrl ? { url: signedUrl } : {}),
@@ -149,6 +179,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, messageId: result.messageId });
   } catch (error) {
+    if (error instanceof WhatsAppNotConfiguredError) {
+      return NextResponse.json({ error: error.message }, { status: 422 });
+    }
     if (error instanceof WhatsAppProviderError) {
       return NextResponse.json({ error: error.message }, { status: 400 });
     }

@@ -1,7 +1,7 @@
-import { Timestamp } from "firebase-admin/firestore";
-import { getDb } from "./firebase-admin";
+import { getSql } from "./db";
 import { getEffectiveRole } from "./roles";
 import type { PresenceRecord, PresenceStatus, PresenceSurface } from "./presence-shared";
+import type { UserRole } from "./types";
 
 export type { PresenceRecord, PresenceStatus, PresenceSurface } from "./presence-shared";
 export { SURFACE_LABELS, presenceRoleLabel } from "./presence-shared";
@@ -16,14 +16,6 @@ export function resolvePresenceStatus(lastSeenAt: Date): PresenceStatus {
   return "offline";
 }
 
-function presenceRef(companyId: string, uid: string) {
-  return getDb()
-    .collection("company_presence")
-    .doc(companyId)
-    .collection("users")
-    .doc(uid);
-}
-
 export async function upsertPresence(input: {
   companyId: string;
   uid: string;
@@ -35,11 +27,15 @@ export async function upsertPresence(input: {
   currentPath?: string;
   status?: PresenceStatus;
 }): Promise<void> {
-  const now = Timestamp.now();
+  const now = new Date();
   const role = getEffectiveRole({ role: input.role, cargo: input.cargo });
 
-  await presenceRef(input.companyId, input.uid).set(
-    {
+  await getSql().presence.upsert({
+    where: {
+      companyId_uid: { companyId: input.companyId, uid: input.uid },
+    },
+    create: {
+      companyId: input.companyId,
       uid: input.uid,
       name: input.name || null,
       email: input.email || null,
@@ -48,57 +44,44 @@ export async function upsertPresence(input: {
       currentSurface: input.currentSurface,
       currentPath: input.currentPath || null,
       lastSeenAt: now,
-      updatedAt: now,
     },
-    { merge: true }
-  );
+    update: {
+      name: input.name || null,
+      email: input.email || null,
+      role,
+      status: input.status || "online",
+      currentSurface: input.currentSurface,
+      currentPath: input.currentPath || null,
+      lastSeenAt: now,
+    },
+  });
 }
 
 export async function markPresenceOffline(companyId: string, uid: string): Promise<void> {
-  const now = Timestamp.now();
-  await presenceRef(companyId, uid).set(
-    {
-      status: "offline",
-      lastSeenAt: now,
-      updatedAt: now,
-    },
-    { merge: true }
-  );
+  await getSql().presence.updateMany({
+    where: { companyId, uid },
+    data: { status: "offline", lastSeenAt: new Date() },
+  });
 }
 
 export async function listCompanyPresence(companyId: string): Promise<PresenceRecord[]> {
-  const snap = await getDb()
-    .collection("company_presence")
-    .doc(companyId)
-    .collection("users")
-    .get();
+  const rows = await getSql().presence.findMany({ where: { companyId } });
 
-  return snap.docs
-    .map((doc) => {
-      const data = doc.data() as {
-        uid?: string;
-        name?: string;
-        email?: string;
-        role?: import("./types").UserRole;
-        currentSurface?: PresenceSurface;
-        currentPath?: string;
-        lastSeenAt?: Timestamp;
-        updatedAt?: Timestamp;
-      };
-
-      const lastSeenAt = data.lastSeenAt?.toDate() || new Date(0);
+  return rows
+    .map((row) => {
+      const lastSeenAt = row.lastSeenAt || new Date(0);
       const status = resolvePresenceStatus(lastSeenAt);
 
       return {
-        uid: data.uid || doc.id,
-        name: data.name,
-        email: data.email,
-        role: data.role || "member",
+        uid: row.uid,
+        name: row.name ?? undefined,
+        email: row.email ?? undefined,
+        role: (row.role as UserRole | null) || "member",
         status,
-        currentSurface: data.currentSurface || "api",
-        currentPath: data.currentPath,
+        currentSurface: (row.currentSurface as PresenceSurface) || "api",
+        currentPath: row.currentPath ?? undefined,
         lastSeenAt,
-        updatedAt: data.updatedAt?.toDate() || lastSeenAt,
+        updatedAt: row.updatedAt || lastSeenAt,
       };
     })
     .filter((r) => r.status !== "offline")
