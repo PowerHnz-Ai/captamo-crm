@@ -1,5 +1,11 @@
 # Runbook — Migração do CRM para VPS nova + Firebase novo
 
+> **Nota (atualização):** o checklist deixou de ser embutido no CRM. Agora é o app
+> independente **Captamo Tasks** (repositório e deploy próprios; fonte em
+> `C:\Users\Power\Captamo Tasks`). As menções abaixo a `task-checklist/` e ao
+> checklist "embutido" são históricas — o CRM apenas encaminha para
+> `NEXT_PUBLIC_TASK_CHECKLIST_URL`.
+
 O CRM muda para uma **VPS nova**, com **domínio novo** e **projeto Firebase novo**
 (clientes recomeçam do zero). O **task checklist** fica na VPS antiga
 (31.97.85.113) com o Firebase atual (`checklist-de82b`) e herda o domínio

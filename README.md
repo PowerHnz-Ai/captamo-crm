@@ -2,7 +2,7 @@
 
 **Captamo** é o CRM de WhatsApp multi-clínicas (contatos, conversas, templates, campanhas, funil, relatórios), com painel de plataforma para gestão das clínicas.
 
-O hub (`/hub`) é o lançador de apps Captamo — hoje **API Captamo** (o CRM). O checklist operacional (`/checklist/*`, fonte em `task-checklist/`) é um produto avulso que roda separado no seu próprio servidor/Firebase.
+O hub (`/hub`) é o lançador de apps Captamo — hoje **API Captamo** (o CRM). O checklist operacional (**Captamo Tasks**) é um produto **independente**, com repositório, deploy e domínio próprios; o CRM apenas encaminha para a URL externa dele (`NEXT_PUBLIC_TASK_CHECKLIST_URL`).
 
 ## Arquitetura
 
@@ -12,8 +12,8 @@ O hub (`/hub`) é o lançador de apps Captamo — hoje **API Captamo** (o CRM). 
   → /platform: painel da plataforma (super admin) — cadastro/gestão de clínicas
 ```
 
-- **Firebase:** projeto `captamo-hub` (auth + Firestore/Storage; o antigo `checklist-de82b` ficou com o task checklist avulso)
-- **Checklist:** fonte em `task-checklist/`, build para `public/checklist/` via `npm run build-checklist`
+- **Firebase:** projeto `captamo-hub` (auth + Firestore/Storage; o antigo `checklist-de82b` ficou com o Captamo Tasks avulso)
+- **Captamo Tasks (checklist):** app externo, repositório próprio; o CRM encaminha via `NEXT_PUBLIC_TASK_CHECKLIST_URL`. Integração de confirmação de tarefas continua em `/api/integrations/checklist/confirm`
 - **Campanhas:** fila `campaigns/{id}/jobs`, processador em `/api/campaigns/process` (cron com `CRON_SECRET`)
 - **Provedores WhatsApp:** Meta, Wasender, Evolution (`lib/whatsapp/`)
 
@@ -25,8 +25,6 @@ cp .env.example .env.local
 npm run dev
 ```
 
-O `predev` copia o checklist para `public/checklist/`.
-
 ## Rotas principais
 
 | Área | Rotas |
@@ -34,8 +32,8 @@ O `predev` copia o checklist para `public/checklist/`.
 | Captamo | `/login`, `/hub` |
 | API Captamo | `/`, `/contacts`, `/conversations`, `/templates`, `/campaigns`, `/funnel`, `/reports`, `/settings/*` |
 | Plataforma | `/platform` |
-| Checklist (avulso) | `/checklist/*` |
-| Legado | `/operacional` → redirect para `/checklist/` |
+| Captamo Tasks | app externo (`NEXT_PUBLIC_TASK_CHECKLIST_URL`) |
+| Legado | `/operacional` → redirect para o Captamo Tasks externo |
 
 ## Disparos (campanhas)
 

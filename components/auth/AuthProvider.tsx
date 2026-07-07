@@ -19,6 +19,7 @@ import { getFirebaseAuth } from "@/lib/firebase-client";
 import { setAuthTokenGetter } from "@/lib/auth-token";
 import { apiFetch } from "@/lib/api-fetch";
 import { getUltraMode, isApiMode, type UltraMode } from "@/lib/ultra-mode";
+import { CHECKLIST_ENTRY_PATH } from "@/lib/checklist-path";
 import { getImpersonation, stopImpersonation } from "@/lib/impersonation";
 import { getEffectiveRole, roleLabel } from "@/lib/roles";
 import type { UserRole } from "@/lib/types";
@@ -52,10 +53,6 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const PUBLIC_PATHS = ["/login"];
-
-function isChecklistPath(pathname: string): boolean {
-  return pathname.startsWith("/checklist");
-}
 
 function isApiPath(pathname: string): boolean {
   return (
@@ -202,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (user && pathname !== "/hub" && pathname !== "/login" && !isChecklistPath(pathname)) {
+    if (user && pathname !== "/hub" && pathname !== "/login") {
       const mode = getUltraMode();
       const settingsPath = pathname.startsWith("/settings");
 
@@ -212,12 +209,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const effectiveMode = mode || "api";
-      const isOperacionalRoute =
-        pathname.startsWith("/operacional") || isChecklistPath(pathname);
+      const isOperacionalRoute = pathname.startsWith("/operacional");
       const isCrmRoute = isApiPath(pathname);
 
       if (!isApiMode(effectiveMode) && isCrmRoute) {
-        router.replace("/checklist/index.html");
+        // Captamo Tasks é um app externo — sai do domínio do CRM.
+        window.location.href = CHECKLIST_ENTRY_PATH;
+        return;
       }
 
       if (isApiMode(effectiveMode) && isOperacionalRoute) {

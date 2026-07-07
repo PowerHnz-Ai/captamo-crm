@@ -68,7 +68,9 @@ A segunda URL deve retornar **apenas** `ok` (texto).
 3. Assinar o campo **messages**
 4. Se o app não estiver publicado, adicione o número de teste na Meta
 
-## Checklist embutido
+## Captamo Tasks (checklist)
 
-O CRM serve o checklist em `/checklist` (copiado de `task-checklist/` no
-`npm run build`).
+O checklist é um app **externo** (Captamo Tasks), com deploy e domínio próprios.
+O CRM não serve mais `/checklist` — apenas encaminha para a URL configurada em
+`NEXT_PUBLIC_TASK_CHECKLIST_URL`. A integração de confirmação de tarefas continua
+no endpoint `/api/integrations/checklist/confirm`.
