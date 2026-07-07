@@ -13,7 +13,7 @@
   → Ultra Operacional: /checklist/* (app vanilla full-page, mesmo Firebase)
 ```
 
-- **Firebase:** projeto `checklist-de82b` (auth + Firestore compartilhado)
+- **Firebase:** projeto `captamo-hub` (auth + Firestore/Storage; o antigo `checklist-de82b` ficou com o task checklist avulso)
 - **Checklist:** fonte em `task-checklist/`, build para `public/checklist/` via `npm run build-checklist`
 - **Campanhas:** fila `campaigns/{id}/jobs`, processador em `/api/campaigns/process` (cron com `CRON_SECRET`)
 - **Provedores WhatsApp:** Meta, Wasender, Evolution (`lib/whatsapp/`)

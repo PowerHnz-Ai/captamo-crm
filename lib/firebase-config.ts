@@ -7,7 +7,7 @@ export const firebasePublicConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "",
 };
 
-export const sharedFirebaseProjectId = "checklist-de82b";
+export const sharedFirebaseProjectId = "captamo-hub";
 
 export function isFirebaseClientConfigured(): boolean {
   return Boolean(
