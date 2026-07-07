@@ -1,16 +1,15 @@
-# ULTRA HUB
+# CAPTAMO
 
-**ULTRA HUB** é o produto unificado da Mister Odonto com duas sessões:
+**Captamo** é o CRM de WhatsApp multi-clínicas (contatos, conversas, templates, campanhas, funil, relatórios), com painel de plataforma para gestão das clínicas.
 
-- **Ultra API** — CRM WhatsApp (contatos, conversas, templates, campanhas, funil, relatórios)
-- **Ultra Operacional** — Checklist de tarefas (agenda, pronta entrega, equipe)
+O hub (`/hub`) é o lançador de apps Captamo — hoje **API Captamo** (o CRM). O checklist operacional (`/checklist/*`, fonte em `task-checklist/`) é um produto avulso que roda separado no seu próprio servidor/Firebase.
 
 ## Arquitetura
 
 ```
-/login (ULTRA HUB) → /hub
-  → Ultra API: /, /contacts, /conversations, /templates, /campaigns, ...
-  → Ultra Operacional: /checklist/* (app vanilla full-page, mesmo Firebase)
+/login (Captamo) → /hub
+  → API Captamo: /, /contacts, /conversations, /templates, /campaigns, ...
+  → /platform: painel da plataforma (super admin) — cadastro/gestão de clínicas
 ```
 
 - **Firebase:** projeto `captamo-hub` (auth + Firestore/Storage; o antigo `checklist-de82b` ficou com o task checklist avulso)
@@ -32,9 +31,10 @@ O `predev` copia o checklist para `public/checklist/`.
 
 | Área | Rotas |
 |------|-------|
-| ULTRA HUB | `/login`, `/hub` |
-| Ultra API | `/`, `/contacts`, `/conversations`, `/templates`, `/campaigns`, `/funnel`, `/reports`, `/settings/*` |
-| Ultra Operacional | `/checklist/*` |
+| Captamo | `/login`, `/hub` |
+| API Captamo | `/`, `/contacts`, `/conversations`, `/templates`, `/campaigns`, `/funnel`, `/reports`, `/settings/*` |
+| Plataforma | `/platform` |
+| Checklist (avulso) | `/checklist/*` |
 | Legado | `/operacional` → redirect para `/checklist/` |
 
 ## Disparos (campanhas)

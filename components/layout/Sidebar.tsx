@@ -186,7 +186,7 @@ export function Sidebar({ mode = "api", onlineCount }: SidebarProps) {
     setSettingsOpen((v) => !v);
   }, [collapsed, expandSidebar]);
 
-  const productName = mode === "operacional" ? "Ultra Operacional" : "Ultra API";
+  const productName = mode === "operacional" ? "Operacional" : "API Captamo";
   const productSubtitle =
     mode === "operacional" ? "Checklist de tarefas" : "WhatsApp CRM e campanhas";
 

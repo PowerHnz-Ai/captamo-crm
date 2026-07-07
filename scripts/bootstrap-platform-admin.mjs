@@ -68,7 +68,7 @@ try {
   user = await getAuth().createUser({
     email: EMAIL,
     password: PASSWORD,
-    displayName: "Ultra Hub Admin",
+    displayName: "Captamo Admin",
     emailVerified: true,
   });
   console.log("usuário criado:", user.uid);
@@ -79,7 +79,7 @@ const docRef = db.doc(`users/${user.uid}`);
 const existing = await docRef.get();
 await docRef.set(
   {
-    name: "Ultra Hub Admin",
+    name: "Captamo Admin",
     email: EMAIL,
     role: "admin",
     active: true,

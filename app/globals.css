@@ -97,7 +97,7 @@ html[data-theme="light"] {
   --color-app-danger: var(--danger);
   --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
-  --font-ultra: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
+  --font-ultra: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
 }
 
 * {
@@ -137,8 +137,8 @@ body {
 }
 
 .font-ultra-logo {
-  font-family: var(--font-montserrat), ui-sans-serif, system-ui, sans-serif;
-  font-weight: 900;
+  font-family: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
 }
 
 .mesh-bg {

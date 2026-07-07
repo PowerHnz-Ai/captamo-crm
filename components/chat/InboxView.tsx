@@ -60,7 +60,7 @@ function showDesktopNotification(count: number) {
   if (Notification.permission !== "granted") return;
   if (!document.hidden) return;
   try {
-    const n = new Notification("Ultra API — nova mensagem", {
+    const n = new Notification("API Captamo — nova mensagem", {
       body:
         count === 1
           ? "Você tem 1 conversa não lida."

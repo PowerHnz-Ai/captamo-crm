@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Montserrat, Plus_Jakarta_Sans } from "next/font/google";
+import { DM_Sans, Nunito_Sans, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
 import { AppDialogProvider } from "@/components/ui/AppDialogProvider";
@@ -14,15 +14,16 @@ const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
 });
 
-const montserrat = Montserrat({
-  variable: "--font-montserrat",
+// Fonte da logo Captamo (Nunito Sans ExtraBold).
+const nunitoSans = Nunito_Sans({
+  variable: "--font-nunito",
   subsets: ["latin"],
-  weight: ["900"],
+  weight: ["800"],
 });
 
 export const metadata: Metadata = {
-  title: "ULTRA HUB",
-  description: "ULTRA HUB — Ultra API (WhatsApp CRM) e Ultra Operacional (checklist)",
+  title: "Captamo",
+  description: "Captamo — CRM de WhatsApp para captação e atendimento",
 };
 
 export default function RootLayout({
@@ -33,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${dmSans.variable} ${jakarta.variable} ${montserrat.variable} h-full`}
+      className={`${dmSans.variable} ${jakarta.variable} ${nunitoSans.variable} h-full`}
       suppressHydrationWarning
     >
       <head>

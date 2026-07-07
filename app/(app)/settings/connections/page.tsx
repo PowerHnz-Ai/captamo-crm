@@ -203,17 +203,17 @@ export default function ConnectionsPage() {
         >
           {officialApi.configured ? (
             <p>
-              API oficial configurada pela equipe Ultra Hub
+              API oficial configurada pela equipe Captamo
               {officialApi.configuredAt
                 ? ` em ${new Date(officialApi.configuredAt).toLocaleDateString("pt-BR")}`
                 : ""}{" "}
               — token {officialApi.tokenMasked}. Alterações são feitas pela equipe
-              Ultra Hub.
+              Captamo.
             </p>
           ) : (
             <p>
               WhatsApp ainda não configurado. O envio de mensagens está bloqueado
-              até a equipe Ultra Hub concluir a ativação da API desta conta.
+              até a equipe Captamo concluir a ativação da API desta conta.
             </p>
           )}
         </div>

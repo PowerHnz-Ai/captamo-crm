@@ -167,7 +167,7 @@ export default function PlatformPage() {
   return (
     <PlatformShell
       title="Painel da plataforma"
-      subtitle="Todas as clínicas da Ultra Hub: cadastro, credenciais e acesso aos painéis"
+      subtitle="Todas as clínicas do Captamo: cadastro, credenciais e acesso aos painéis"
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_1.6fr]">
         <Card hover={false} className="self-start">

@@ -17,9 +17,9 @@ export interface PresenceRecord {
 }
 
 export const SURFACE_LABELS: Record<PresenceSurface, string> = {
-  hub: "ULTRA HUB",
-  api: "Ultra API",
-  checklist: "Ultra Operacional",
+  hub: "Captamo",
+  api: "API Captamo",
+  checklist: "Operacional",
 };
 
 export function presenceRoleLabel(role: UserRole): string {

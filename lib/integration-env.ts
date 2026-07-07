@@ -75,7 +75,7 @@ export async function checkWebhookUrlReachability(
         status: response.status,
         bodyPreview: text.slice(0, 100),
         message:
-          "Esta URL retorna uma página HTML (ex.: Task Checklist), não o Ultra API CRM. Faça deploy do CRM nesse domínio ou use outra URL (subdomínio ou ngrok).",
+          "Esta URL retorna uma página HTML (ex.: Task Checklist), não o CRM Captamo. Faça deploy do CRM nesse domínio ou use outra URL (subdomínio ou ngrok).",
       };
     }
 

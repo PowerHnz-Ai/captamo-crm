@@ -212,7 +212,7 @@ export class WhatsAppProviderError extends Error {
 /** Empresa sem credenciais da API — envio bloqueado até a equipe ativar. */
 export class WhatsAppNotConfiguredError extends WhatsAppProviderError {
   constructor(
-    message = "WhatsApp não configurado para esta conta. Solicite a ativação à equipe Ultra Hub."
+    message = "WhatsApp não configurado para esta conta. Solicite a ativação à equipe Captamo."
   ) {
     super(message, 422);
     this.name = "WhatsAppNotConfiguredError";

@@ -58,7 +58,7 @@ export default function LoginPage() {
       <div className="glass-card w-full max-w-md p-6 md:p-8">
         <div className="mb-6">
           <UltraWordmark variant="hub" size="xl" />
-          <p className="mt-2 text-sm text-app-muted">Ultra API + Ultra Operacional</p>
+          <p className="mt-2 text-sm text-app-muted">API Captamo</p>
         </div>
 
         {mode === "login" ? (

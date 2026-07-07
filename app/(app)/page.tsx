@@ -39,7 +39,7 @@ export default function DashboardPage() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="Visão geral da operação WhatsApp — Ultra CRM"
+      subtitle="Visão geral da operação WhatsApp — Captamo"
     >
       {loading ? (
         <p className="text-app-subtle">Carregando métricas...</p>

@@ -17,11 +17,7 @@ export function UltraWordmark({
   variant = "default",
 }: UltraWordmarkProps) {
   const label =
-    variant === "hub"
-      ? "ULTRA HUB"
-      : variant === "operacional"
-        ? "Ultra Operacional"
-        : "Ultra";
+    variant === "operacional" ? "Operacional" : "Captamo";
 
   return (
     <span
