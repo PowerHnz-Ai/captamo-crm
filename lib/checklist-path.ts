@@ -5,4 +5,4 @@
  */
 export const CHECKLIST_ENTRY_PATH =
   process.env.NEXT_PUBLIC_TASK_CHECKLIST_URL?.trim() ||
-  "https://tasks.captamo.com.br";
+  "https://app.misterodonto.com.br";
