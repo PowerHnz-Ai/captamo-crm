@@ -14,11 +14,11 @@ const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
 });
 
-// Fonte da logo Captamo (Nunito Sans ExtraBold).
+// Fonte da logo Captamo (Nunito Sans Black).
 const nunitoSans = Nunito_Sans({
   variable: "--font-nunito",
   subsets: ["latin"],
-  weight: ["800"],
+  weight: ["900"],
 });
 
 export const metadata: Metadata = {

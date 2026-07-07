@@ -17,7 +17,7 @@ export function UltraWordmark({
   variant = "default",
 }: UltraWordmarkProps) {
   const label =
-    variant === "operacional" ? "Operacional" : "Captamo";
+    variant === "operacional" ? "operacional" : "captamo";
 
   return (
     <span
