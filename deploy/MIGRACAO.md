@@ -89,7 +89,7 @@ webhook da Meta de volta e seguir no antigo.
    - Firebase novo em `FIREBASE_*` e `NEXT_PUBLIC_FIREBASE_*` (bucket
      explícito no formato `.firebasestorage.app`).
    - `APP_URL=https://<DOMINIO_NOVO>`;
-     `PLATFORM_ADMIN_EMAILS=mr.misterhub@gmail.com,adminultrahub@gmail.com`;
+     `PLATFORM_ADMIN_EMAILS=mr.misterhub@gmail.com,admincaptamo@gmail.com`;
      `CRM_DEFAULT_COMPANY_ID` vazio por enquanto; `META_*` legadas vazias.
 5. Deploy: `ssh ultra-vps2 "cd /var/www/ultra-api && bash deploy/vps/deploy-remote.sh"`
    — roda `prisma migrate deploy` (cria o schema), build, instala o cron de
@@ -98,7 +98,7 @@ webhook da Meta de volta e seguir no antigo.
 ## Etapa E — Bootstrap dos dados no sistema novo
 
 1. Na VPS nova: `cd /var/www/ultra-api && node scripts/bootstrap-platform-admin.mjs "<senha>"`
-   (cria `adminultrahub@gmail.com`; o admin não precisa de empresa vinculada —
+   (cria `admincaptamo@gmail.com`; o admin não precisa de empresa vinculada —
    após o login ele cai no **painel da plataforma** `/platform`).
 2. Login no CRM novo → painel `/platform` → cadastrar **Mister Odonto**
    (empresa + gerente) → **anotar o código** gerado.
@@ -167,7 +167,7 @@ webhook da Meta de volta e seguir no antigo.
 
 - **Authorized domains** (B.2) é o erro mais comum — login quebra silenciosamente.
 - O webhook da Meta é um por app: a troca da URL migra o inbound de uma vez.
-- `adminultrahub@gmail.com` existirá em DOIS Firebases (antigo e novo) com
+- `admincaptamo@gmail.com` (novo) e `adminultrahub@gmail.com` (antigo) existem em Firebases diferentes com
   senhas independentes.
 - Chaves de criptografia são por banco: a `CREDENTIALS_ENCRYPTION_KEY` nova
   nunca deve ser trocada depois que credenciais forem cadastradas (perde-se o

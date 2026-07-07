@@ -1,5 +1,5 @@
 // Bootstrap do platform admin em um projeto Firebase novo: cria/atualiza a
-// conta adminultrahub@gmail.com e o doc users/{uid}, e valida o login com a
+// conta admincaptamo@gmail.com e o doc users/{uid}, e valida o login com a
 // senha informada. O platform admin NÃO precisa de empresa vinculada — após
 // o login ele cai no painel da plataforma (/platform).
 //
@@ -12,7 +12,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
-const EMAIL = "adminultrahub@gmail.com";
+const EMAIL = "admincaptamo@gmail.com";
 
 function loadEnv() {
   const file = [".env.production", ".env.local"].find((f) => existsSync(f));

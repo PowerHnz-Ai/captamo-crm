@@ -8,7 +8,7 @@ import { initializeApp, cert, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
 const IMPERSONATION_HEADER = "x-platform-company-id";
-const ADMIN_EMAIL = "adminultrahub@gmail.com";
+const ADMIN_EMAIL = "admincaptamo@gmail.com";
 
 function loadEnv() {
   return Object.fromEntries(
