@@ -363,13 +363,3 @@ export const createConnectionSchema = z.object({
   phoneNumberId: z.string().optional(),
   wabaId: z.string().optional(),
 });
-
-export const checklistConfirmSchema = z.object({
-  apiKey: z.string().min(1),
-  companyId: z.string().min(1),
-  patientName: z.string().min(1),
-  phone: z.string().min(10),
-  date: z.string().min(1),
-  time: z.string().min(1),
-  taskId: z.string().optional(),
-});

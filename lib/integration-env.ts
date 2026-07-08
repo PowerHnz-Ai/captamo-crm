@@ -66,8 +66,7 @@ export async function checkWebhookUrlReachability(
 
     const isHtml =
       text.trimStart().startsWith("<!") ||
-      text.toLowerCase().includes("<html") ||
-      text.includes("Task Checklist");
+      text.toLowerCase().includes("<html");
 
     if (isHtml) {
       return {
@@ -75,7 +74,7 @@ export async function checkWebhookUrlReachability(
         status: response.status,
         bodyPreview: text.slice(0, 100),
         message:
-          "Esta URL retorna uma página HTML (ex.: Task Checklist), não o CRM Captamo. Faça deploy do CRM nesse domínio ou use outra URL (subdomínio ou ngrok).",
+          "Esta URL retorna uma página HTML, não a resposta do webhook do CRM. Confira se o CRM está no ar nesse domínio.",
       };
     }
 

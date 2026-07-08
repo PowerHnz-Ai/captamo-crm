@@ -149,7 +149,7 @@ function NavLink({
   );
 }
 
-export function Sidebar({ mode = "api", onlineCount }: SidebarProps) {
+export function Sidebar({ onlineCount }: SidebarProps) {
   const pathname = usePathname();
   const { user, profile, logout } = useAuth();
   const { can, role } = usePermissions();
@@ -186,9 +186,8 @@ export function Sidebar({ mode = "api", onlineCount }: SidebarProps) {
     setSettingsOpen((v) => !v);
   }, [collapsed, expandSidebar]);
 
-  const productName = mode === "operacional" ? "Operacional" : "API Captamo";
-  const productSubtitle =
-    mode === "operacional" ? "Checklist de tarefas" : "WhatsApp CRM e campanhas";
+  const productName = "API Captamo";
+  const productSubtitle = "WhatsApp CRM e campanhas";
 
   const visibleMain = mainNavItems.filter(
     (item) => !item.permission || can(item.permission)
@@ -197,10 +196,6 @@ export function Sidebar({ mode = "api", onlineCount }: SidebarProps) {
     (item) => !item.permission || can(item.permission)
   );
   const showSettings = visibleSettings.length > 0;
-
-  if (mode === "operacional") {
-    return null;
-  }
 
   return (
     <aside

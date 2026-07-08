@@ -30,13 +30,13 @@ export default function HubPage() {
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="flex justify-center">
           <motion.button
             type="button"
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={enterApi}
-            className="glass-card group cursor-pointer p-6 text-left"
+            className="glass-card group w-full max-w-sm cursor-pointer p-6 text-left"
           >
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-app-accent/15 text-app-accent">
               <LayoutGrid className="h-6 w-6" />

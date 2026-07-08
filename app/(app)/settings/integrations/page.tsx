@@ -181,10 +181,8 @@ export default function IntegrationsPage() {
             )}
           </p>
           <p className="mt-3 text-sm text-red-100/90">
-            <strong>Causa provável:</strong> <code className="rounded bg-black/30 px-1">app.misterodonto.com.br</code>{" "}
-            hoje serve o Task Checklist, não o CRM Captamo. A Meta precisa de uma URL onde o Next.js do CRM
-            esteja em produção (ex.: subdomínio <code className="rounded bg-black/30 px-1">crm.misterodonto.com.br</code>{" "}
-            ou deploy do CRM no mesmo domínio).
+            Confira se o <code className="rounded bg-black/30 px-1">WHATSAPP_VERIFY_TOKEN</code> em
+            produção confere com o configurado na Meta e se o CRM está no ar na URL acima.
           </p>
         </Card>
       )}

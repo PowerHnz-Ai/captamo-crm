@@ -1,7 +1,7 @@
 type UltraWordmarkProps = {
   className?: string;
   size?: "sm" | "md" | "lg" | "xl";
-  variant?: "default" | "hub" | "operacional";
+  variant?: "default" | "hub";
 };
 
 const sizeClasses = {
@@ -14,16 +14,12 @@ const sizeClasses = {
 export function UltraWordmark({
   className = "",
   size = "md",
-  variant = "default",
 }: UltraWordmarkProps) {
-  const label =
-    variant === "operacional" ? "operacional" : "captamo";
-
   return (
     <span
       className={`font-ultra-logo tracking-tight text-app-text ${sizeClasses[size]} ${className}`}
     >
-      {label}
+      captamo
     </span>
   );
 }

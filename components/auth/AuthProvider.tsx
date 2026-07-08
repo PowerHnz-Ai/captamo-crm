@@ -18,8 +18,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { getFirebaseAuth } from "@/lib/firebase-client";
 import { setAuthTokenGetter } from "@/lib/auth-token";
 import { apiFetch } from "@/lib/api-fetch";
-import { getUltraMode, isApiMode, type UltraMode } from "@/lib/ultra-mode";
-import { CHECKLIST_ENTRY_PATH } from "@/lib/checklist-path";
+import { getUltraMode, type UltraMode } from "@/lib/ultra-mode";
 import { getImpersonation, stopImpersonation } from "@/lib/impersonation";
 import { getEffectiveRole, roleLabel } from "@/lib/roles";
 import type { UserRole } from "@/lib/types";
@@ -53,19 +52,6 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const PUBLIC_PATHS = ["/login"];
-
-function isApiPath(pathname: string): boolean {
-  return (
-    pathname === "/" ||
-    pathname.startsWith("/contacts") ||
-    pathname.startsWith("/templates") ||
-    pathname.startsWith("/campaigns") ||
-    pathname.startsWith("/funnel") ||
-    pathname.startsWith("/reports") ||
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/conversations")
-  );
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -203,23 +189,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const mode = getUltraMode();
       const settingsPath = pathname.startsWith("/settings");
 
+      // Sem app escolhido ainda: manda para o hub (exceto telas de settings).
       if (!mode && !settingsPath) {
         router.replace("/hub");
         return;
-      }
-
-      const effectiveMode = mode || "api";
-      const isOperacionalRoute = pathname.startsWith("/operacional");
-      const isCrmRoute = isApiPath(pathname);
-
-      if (!isApiMode(effectiveMode) && isCrmRoute) {
-        // Captamo Tasks é um app externo — sai do domínio do CRM.
-        window.location.href = CHECKLIST_ENTRY_PATH;
-        return;
-      }
-
-      if (isApiMode(effectiveMode) && isOperacionalRoute) {
-        router.replace("/");
       }
     }
   }, [user, loading, pathname, router, profile]);

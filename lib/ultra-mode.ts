@@ -1,9 +1,9 @@
-export type UltraMode = "crm" | "api" | "operacional";
+export type UltraMode = "crm" | "api";
 
 const STORAGE_KEY = "ultraMode";
 
 export function normalizeUltraMode(value: string | null): UltraMode | null {
-  if (value === "crm" || value === "api" || value === "operacional") return value;
+  if (value === "crm" || value === "api") return value;
   return null;
 }
 

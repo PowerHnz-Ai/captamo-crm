@@ -67,9 +67,9 @@ export function getAuthFailureMessage(reason: AuthFailureReason): string {
     case "invalid_token":
       return "Token inválido. Faça login novamente.";
     case "profile_missing":
-      return "Perfil não encontrado. Complete o cadastro no Task Checklist.";
+      return "Perfil não encontrado. Contate um administrador para concluir seu cadastro.";
     case "company_missing":
-      return "Usuário sem empresa vinculada. Entre em uma empresa no Task Checklist.";
+      return "Usuário sem empresa vinculada. Contate um administrador.";
     case "account_disabled":
       return "Sua conta foi desativada nesta empresa. Contate um administrador.";
     default:
