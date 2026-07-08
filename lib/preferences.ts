@@ -5,19 +5,19 @@ import type {
 } from "./types";
 
 export const ACCENT_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "#2e9ee5", label: "Captamo" },
+  { value: "#d9c07e", label: "Dourado" },
   { value: "#10b981", label: "Esmeralda" },
-  { value: "#3b82f6", label: "Azul" },
   { value: "#8b5cf6", label: "Roxo" },
   { value: "#ec4899", label: "Rosa" },
   { value: "#f59e0b", label: "Âmbar" },
   { value: "#ef4444", label: "Vermelho" },
-  { value: "#14b8a6", label: "Turquesa" },
   { value: "#0ea5e9", label: "Ciano" },
 ];
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   theme: "dark",
-  accent: "#10b981",
+  accent: "#2e9ee5",
   fontSize: "medium",
 };
 

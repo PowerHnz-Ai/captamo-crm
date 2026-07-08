@@ -55,12 +55,15 @@ fi
 
 PM2_CONFIG="deploy/vps/ecosystem.config.cjs"
 
-echo "==> Reiniciando PM2..."
-if pm2 describe ultra-api >/dev/null 2>&1; then
-  pm2 restart "$PM2_CONFIG" --update-env
-else
-  pm2 start "$PM2_CONFIG"
-fi
+# IMPORTANTE: recriamos o processo (delete + start) em vez de `restart --update-env`.
+# O daemon do pm2 guarda um env próprio e o injeta nos filhos; `@next/env` NÃO
+# sobrescreve env já definido, então um `restart --update-env` com shell "sujo"
+# pode fixar valores ANTIGOS (ex.: chave Firebase rotacionada, PLATFORM_ADMIN_EMAILS
+# desatualizado) e quebrar a autenticação. Start limpo garante que o `next start`
+# leia o .env.production atual como fonte de verdade.
+echo "==> (Re)iniciando PM2 do zero (evita env obsoleto do daemon)..."
+pm2 delete ultra-api >/dev/null 2>&1 || true
+pm2 start "$PM2_CONFIG"
 pm2 save
 
 echo "==> Health check local..."

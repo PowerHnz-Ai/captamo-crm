@@ -1,10 +1,37 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { processNormalizedWebhookEvents } from "@/lib/webhook-pipeline";
 import { resolveWebhookTarget } from "@/lib/webhook-resolve";
 import { logWebhookEvent } from "@/lib/webhook-log";
 import { getWhatsAppProvider } from "@/lib/whatsapp";
+
+/**
+ * Valida a assinatura X-Hub-Signature-256 da Meta (HMAC-SHA256 do corpo cru com
+ * META_APP_SECRET). Opt-in: se META_APP_SECRET não estiver configurado, não
+ * valida — mantém compatibilidade até o segredo ser preenchido. Depois de setar,
+ * requisições forjadas (sem a assinatura correta) passam a ser rejeitadas.
+ */
+function verifyMetaSignature(
+  rawBody: string,
+  signatureHeader: string | null
+): boolean {
+  const appSecret = process.env.META_APP_SECRET?.trim();
+  if (!appSecret) return true;
+  if (!signatureHeader?.startsWith("sha256=")) return false;
+  const expectedHex = signatureHeader.slice("sha256=".length);
+  const computedHex = createHmac("sha256", appSecret)
+    .update(rawBody, "utf8")
+    .digest("hex");
+  try {
+    const a = Buffer.from(expectedHex, "hex");
+    const b = Buffer.from(computedHex, "hex");
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
 
 async function handleWebhook(
   request: NextRequest,
@@ -12,7 +39,17 @@ async function handleWebhook(
 ) {
   let companyId = "";
   try {
-    const payload = await request.json();
+    const rawBody = await request.text();
+
+    if (
+      provider === "meta" &&
+      !verifyMetaSignature(rawBody, request.headers.get("x-hub-signature-256"))
+    ) {
+      console.warn("[webhook/meta] assinatura X-Hub-Signature-256 inválida — ignorado");
+      return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+    }
+
+    const payload = rawBody ? JSON.parse(rawBody) : {};
     const target = await resolveWebhookTarget(provider, payload);
     if (!target) {
       // Número não pertence a nenhuma empresa: 200 para a Meta não reenviar.
