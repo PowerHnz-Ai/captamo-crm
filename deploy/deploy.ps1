@@ -1,7 +1,7 @@
 # Deploy Ultra API CRM para VPS Hostinger
 # Uso: .\deploy\deploy.ps1
 
-$VPS_HOST = "31.97.85.113"
+$VPS_HOST = "187.127.39.197"
 $VPS_USER = "root"
 $REMOTE_PATH = "/var/www/ultra-api"
 $SSH_KEY = $env:ULTRA_API_SSH_KEY
@@ -41,7 +41,7 @@ function Invoke-ScpFile {
     }
 }
 
-$webhookTestUrl = "https://app.misterodonto.com.br/api/webhook/whatsapp/meta?hub.mode=subscribe" + "&hub.verify_token=misterhubcrm_webhook_2026" + "&hub.challenge=ok"
+$webhookTestUrl = "https://app.captamo.com.br/api/webhook/whatsapp/meta?hub.mode=subscribe" + "&hub.verify_token=misterhubcrm_webhook_2026" + "&hub.challenge=ok"
 
 Write-Host ("Deploy Ultra API -> " + $VPS_USER + "@" + $VPS_HOST + ":" + $REMOTE_PATH) -ForegroundColor Cyan
 Write-Host "Senha SSH: 2 vezes (SCP + SSH)" -ForegroundColor DarkGray

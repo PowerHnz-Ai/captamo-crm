@@ -1,7 +1,7 @@
 # Continua o deploy na VPS (compativel com Windows OpenSSH)
 # Uso: .\deploy\deploy-recover.ps1
 
-$VPS_HOST = "31.97.85.113"
+$VPS_HOST = "187.127.39.197"
 $VPS_USER = "root"
 $REMOTE_PATH = "/var/www/ultra-api"
 $SSH_KEY = $env:ULTRA_API_SSH_KEY
@@ -41,7 +41,7 @@ function Invoke-ScpFile {
     }
 }
 
-$webhookTestUrl = "https://app.misterodonto.com.br/api/webhook/whatsapp/meta?hub.mode=subscribe" + "&hub.verify_token=misterhubcrm_webhook_2026" + "&hub.challenge=ok"
+$webhookTestUrl = "https://app.captamo.com.br/api/webhook/whatsapp/meta?hub.mode=subscribe" + "&hub.verify_token=misterhubcrm_webhook_2026" + "&hub.challenge=ok"
 
 Write-Host ("Recover deploy -> " + $VPS_USER + "@" + $VPS_HOST) -ForegroundColor Cyan
 Write-Host "Senha SSH: ate 2 vezes (SCP + SSH)" -ForegroundColor DarkGray
