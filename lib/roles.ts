@@ -23,12 +23,23 @@ export function normalizeRole(role?: string | null, cargo?: string | null): User
   return "member";
 }
 
+/**
+ * Tolerante a variações: docs de usuário podem vir de fontes legadas (Task
+ * Checklist, console) com maiúsculas, acentos ou labels ("Líder", "Supervisor").
+ * Um valor não reconhecido cai em member — o que já rebaixou um gerente real
+ * silenciosamente; por isso aceitamos os sinônimos conhecidos.
+ */
 function normalizeSingleRole(raw: string): UserRole | null {
-  if (raw === "admin") return "admin";
-  if (raw === "gerente") return "gerente";
-  if (raw === "leader") return "leader";
-  if (raw === "atendimento") return "member";
-  if (raw === "member") return "member";
+  const value = raw
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+  if (value === "admin" || value === "administrador") return "admin";
+  if (value === "gerente" || value === "lider") return "gerente";
+  if (value === "leader" || value === "supervisor") return "leader";
+  if (value === "atendimento" || value === "atendente") return "member";
+  if (value === "member" || value === "colaborador") return "member";
   return null;
 }
 

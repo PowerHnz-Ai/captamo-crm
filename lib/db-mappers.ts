@@ -155,6 +155,7 @@ export function templateFromRow(row: TemplateRow): Template {
     provider: orUndef(row.provider) as Template["provider"],
     metaTemplateId: orUndef(row.metaTemplateId),
     requiresMetaApproval: orUndef(row.requiresMetaApproval),
+    allowCategoryChange: row.allowCategoryChange,
     submittedAt: ms(row.submittedAt),
     approvedAt: ms(row.approvedAt),
     rejectionReason: orUndef(row.rejectionReason),

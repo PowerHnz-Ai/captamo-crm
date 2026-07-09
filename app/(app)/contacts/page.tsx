@@ -27,6 +27,9 @@ function formatOriginFieldValue(value: string, field: ContactOriginField): strin
 const PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 350;
 
+/** Aba especial: lista de excluídos (LGPD) — contatos fora de qualquer disparo. */
+const EXCLUDED_TAB = "__excluded__";
+
 export default function ContactsPage() {
   const { can } = usePermissions();
   const canWrite = can("contacts.write");
@@ -64,7 +67,12 @@ export default function ContactsPage() {
     params.set("offset", String((targetPage - 1) * PAGE_SIZE));
     if (debouncedSearch) params.set("search", debouncedSearch);
     if (tagFilter) params.set("tag", tagFilter);
-    if (activeOriginTab !== "all") params.set("originId", activeOriginTab);
+    if (activeOriginTab === EXCLUDED_TAB) {
+      params.set("archived", "true");
+    } else {
+      params.set("archived", "false");
+      if (activeOriginTab !== "all") params.set("originId", activeOriginTab);
+    }
 
     const res = await apiFetch(`/api/contacts?${params}`);
     const data = await parseApiJson<{
@@ -194,6 +202,58 @@ export default function ContactsPage() {
     reloadContacts();
   }
 
+  async function patchContactFlags(
+    contact: Contact,
+    flags: { archived: boolean; blocked: boolean; optIn: boolean }
+  ) {
+    const res = await apiFetch("/api/contacts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: contact.id, ...flags }),
+    });
+    const data = await parseApiJson<{ error?: string }>(res);
+    if (!res.ok) throw new Error(data.error || "Erro ao atualizar contato.");
+  }
+
+  /** LGPD: move para a lista de excluídos — fica registrado e nunca mais recebe disparo. */
+  async function handleLgpdExclude(contact: Contact) {
+    const confirmed = await appConfirm(
+      `Mover "${contact.name || contact.phone}" para a lista de excluídos? O contato sai da lista e NUNCA mais recebe disparos — mesmo que apareça em uma nova importação (conformidade LGPD).`,
+      {
+        title: "Excluir da lista (LGPD)",
+        destructive: true,
+        confirmLabel: "Excluir da lista",
+      }
+    );
+    if (!confirmed) return;
+    try {
+      await patchContactFlags(contact, { archived: true, blocked: true, optIn: false });
+      reloadContacts();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : "Erro ao excluir da lista.", {
+        title: "Erro",
+        variant: "error",
+      });
+    }
+  }
+
+  async function handleRestore(contact: Contact) {
+    const confirmed = await appConfirm(
+      `Restaurar "${contact.name || contact.phone}"? Ele volta para a lista de contatos e poderá receber disparos novamente.`,
+      { title: "Restaurar contato", confirmLabel: "Restaurar" }
+    );
+    if (!confirmed) return;
+    try {
+      await patchContactFlags(contact, { archived: false, blocked: false, optIn: true });
+      reloadContacts();
+    } catch (err) {
+      await appAlert(err instanceof Error ? err.message : "Erro ao restaurar.", {
+        title: "Erro",
+        variant: "error",
+      });
+    }
+  }
+
   async function handleDelete(contact: Contact) {
     const confirmed = await appConfirm(
       `Excluir o contato "${contact.name || contact.phone}"? Esta ação não pode ser desfeita.`,
@@ -222,8 +282,10 @@ export default function ContactsPage() {
     }
   }
 
-  const tabLabel =
-    activeOriginTab === "all"
+  const isExcludedTab = activeOriginTab === EXCLUDED_TAB;
+  const tabLabel = isExcludedTab
+    ? "Excluídos (LGPD)"
+    : activeOriginTab === "all"
       ? "Todos"
       : `${activeOrigin?.label ?? "Origem"} (${originCounts[activeOriginTab] ?? 0})`;
 
@@ -273,6 +335,18 @@ export default function ContactsPage() {
                 {origin.label} ({originCounts[origin.id] ?? 0})
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => setActiveOriginTab(EXCLUDED_TAB)}
+              title="Contatos excluídos da lista (LGPD) — nunca recebem disparos"
+              className={`rounded-full px-4 py-1.5 text-sm font-medium transition-colors ${
+                isExcludedTab
+                  ? "bg-red-500/80 text-white"
+                  : "bg-app-secondary/50 text-app-subtle hover:bg-app-secondary"
+              }`}
+            >
+              Excluídos
+            </button>
           </div>
 
           <div className="mb-4 flex flex-wrap gap-3">
@@ -322,9 +396,11 @@ export default function ContactsPage() {
             <p className="text-app-subtle">Carregando...</p>
           ) : contacts.length === 0 ? (
             <p className="text-app-subtle">
-              {activeOriginTab === "all"
-                ? "Nenhum contato cadastrado ainda."
-                : "Nenhum contato nesta origem."}
+              {isExcludedTab
+                ? "Nenhum contato excluído."
+                : activeOriginTab === "all"
+                  ? "Nenhum contato cadastrado ainda."
+                  : "Nenhum contato nesta origem."}
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -398,39 +474,61 @@ export default function ContactsPage() {
                         </td>
                       ))}
                       <td className="py-3 pr-4">
-                        <Badge
-                          tone={contact.optIn ? "success" : "neutral"}
-                          title="Autorização para receber campanhas e mensagens proativas"
-                        >
-                          {contact.optIn ? "Autorizado" : "Não autorizado"}
-                        </Badge>
+                        {isExcludedTab ? (
+                          <Badge tone="danger" title="Excluído da lista (LGPD) — não recebe disparos">
+                            Excluído
+                          </Badge>
+                        ) : (
+                          <Badge
+                            tone={contact.optIn ? "success" : "neutral"}
+                            title="Autorização para receber campanhas e mensagens proativas"
+                          >
+                            {contact.optIn ? "Autorizado" : "Não autorizado"}
+                          </Badge>
+                        )}
                       </td>
                       <td className="py-3">
                         {canWrite ? (
-                          <div className="flex flex-wrap gap-2">
+                          isExcludedTab ? (
                             <Button
                               variant="secondary"
-                              onClick={() => setEditingContact(contact)}
+                              onClick={() => handleRestore(contact)}
                             >
-                              Editar
+                              Restaurar
                             </Button>
-                            <Button
-                              variant="ghost"
-                              onClick={() => {
-                                setEditingId(contact.id);
-                                setEditTags((contact.tags || []).join(", "));
-                              }}
-                            >
-                              Tags
-                            </Button>
-                            <Button
-                              variant="danger"
-                              loading={deletingId === contact.id}
-                              onClick={() => handleDelete(contact)}
-                            >
-                              Excluir
-                            </Button>
-                          </div>
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                variant="secondary"
+                                onClick={() => setEditingContact(contact)}
+                              >
+                                Editar
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                onClick={() => {
+                                  setEditingId(contact.id);
+                                  setEditTags((contact.tags || []).join(", "));
+                                }}
+                              >
+                                Tags
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                title="Excluir da lista (LGPD): sai da lista e nunca mais recebe disparos"
+                                onClick={() => handleLgpdExclude(contact)}
+                              >
+                                LGPD
+                              </Button>
+                              <Button
+                                variant="danger"
+                                loading={deletingId === contact.id}
+                                onClick={() => handleDelete(contact)}
+                              >
+                                Excluir
+                              </Button>
+                            </div>
+                          )
                         ) : (
                           <span className="text-xs text-app-muted">—</span>
                         )}

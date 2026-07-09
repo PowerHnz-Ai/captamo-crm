@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Building2, LogIn, MessageCircle, Trash2, Users } from "lucide-react";
+import { Building2, LogIn, MessageCircle, Pencil, Trash2, Users } from "lucide-react";
 import { PlatformShell } from "@/components/platform/PlatformShell";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -40,6 +40,10 @@ export default function PlatformPage() {
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [renamingCompany, setRenamingCompany] = useState<Company | null>(null);
+  const [renameText, setRenameText] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [renaming, setRenaming] = useState(false);
 
   // Chegar ao painel da plataforma sempre encerra uma impersonação ativa.
   useEffect(() => {
@@ -151,6 +155,33 @@ export default function PlatformPage() {
       setDeleteError(err instanceof Error ? err.message : "Erro ao excluir.");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleRenameCompany() {
+    if (!renamingCompany) return;
+    const name = renameText.trim();
+    if (!name) {
+      setRenameError("Informe o novo nome.");
+      return;
+    }
+    setRenaming(true);
+    setRenameError("");
+    try {
+      const res = await apiFetch(`/api/platform/clients/${renamingCompany.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const data = await parseApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Erro ao renomear empresa.");
+      setRenamingCompany(null);
+      setRenameText("");
+      loadCompanies();
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : "Erro ao renomear.");
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -273,6 +304,18 @@ export default function PlatformPage() {
                       </Button>
                       <Button
                         type="button"
+                        variant="secondary"
+                        title="Renomear empresa"
+                        onClick={() => {
+                          setRenameText(c.name);
+                          setRenameError("");
+                          setRenamingCompany(c);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
                         variant="danger"
                         onClick={() => {
                           setDeleteConfirmText("");
@@ -353,6 +396,55 @@ export default function PlatformPage() {
                 onClick={() => void handleDeleteCompany()}
               >
                 Excluir definitivamente
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {renamingCompany && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !renaming && setRenamingCompany(null)}
+            aria-label="Fechar"
+          />
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-app-border bg-app-card p-6 shadow-2xl">
+            <h2 className="mb-2 font-display text-xl font-semibold">
+              Renomear empresa
+            </h2>
+            <p className="mb-3 text-sm text-app-subtle">
+              Código <code className="rounded bg-white/10 px-1.5 py-0.5 font-mono">{renamingCompany.id}</code>{" "}
+              — o código não muda, só o nome de exibição.
+            </p>
+            <Input
+              id="rename-company"
+              label="Novo nome"
+              value={renameText}
+              onChange={(e) => setRenameText(e.target.value)}
+              placeholder="Nome da empresa"
+              autoFocus
+            />
+            {renameError && (
+              <p className="mt-2 text-sm text-red-400">{renameError}</p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={renaming}
+                onClick={() => setRenamingCompany(null)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="button"
+                loading={renaming}
+                disabled={!renameText.trim()}
+                onClick={() => void handleRenameCompany()}
+              >
+                Salvar
               </Button>
             </div>
           </div>

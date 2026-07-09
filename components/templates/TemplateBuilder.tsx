@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/Button";
+import { Checkbox } from "@/components/ui/Checkbox";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { Card } from "@/components/ui/Card";
@@ -61,6 +62,7 @@ export function TemplateBuilder({
   const [category, setCategory] = useState<"UTILITY" | "MARKETING" | "AUTHENTICATION">(
     "UTILITY"
   );
+  const [allowCategoryChange, setAllowCategoryChange] = useState(false);
   const [headerType, setHeaderType] = useState<TemplateHeaderType>("NONE");
   const [headerText, setHeaderText] = useState("");
   const [headerMedia, setHeaderMedia] = useState<{
@@ -87,6 +89,7 @@ export function TemplateBuilder({
       setCategory(
         (editing.category as "UTILITY" | "MARKETING" | "AUTHENTICATION") || "UTILITY"
       );
+      setAllowCategoryChange(editing.allowCategoryChange ?? false);
       setBody(editing.body);
       setFooter(editing.footer || "");
       setVariableSamples(editing.variableSamples || []);
@@ -118,6 +121,7 @@ export function TemplateBuilder({
     setName(empty.name);
     setLanguage(empty.language);
     setCategory(empty.category);
+    setAllowCategoryChange(false);
     setHeaderType(empty.headerType);
     setHeaderText(empty.headerText);
     setHeaderMedia(empty.headerMedia);
@@ -237,6 +241,7 @@ export function TemplateBuilder({
     const payload = {
       language,
       category,
+      allowCategoryChange,
       body,
       header,
       variableSamples: samples,
@@ -330,6 +335,14 @@ export function TemplateBuilder({
             <option value="AUTHENTICATION">Autenticação</option>
           </Select>
         </div>
+
+        <Checkbox
+          checked={allowCategoryChange}
+          onChange={setAllowCategoryChange}
+          label="Permitir que a Meta ajuste a categoria automaticamente. Desmarcado: se a Meta discordar da categoria escolhida, o template é reprovado (não é publicado em outra categoria)."
+          labelClassName="items-start text-sm text-app-subtle"
+          className="mt-0.5"
+        />
 
         <div className="grid gap-3 md:grid-cols-2">
           <Select

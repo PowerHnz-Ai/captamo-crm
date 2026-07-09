@@ -58,6 +58,7 @@ export async function createTemplateDraft(
     | "category"
     | "body"
     | "requiresMetaApproval"
+    | "allowCategoryChange"
     | "header"
     | "variableSamples"
     | "footer"
@@ -78,6 +79,7 @@ export async function createTemplateDraft(
       status: "draft",
       companyId: scope.companyId,
       requiresMetaApproval: data.requiresMetaApproval ?? true,
+      allowCategoryChange: data.allowCategoryChange ?? false,
     },
   });
   return templateFromRow(row);
@@ -96,6 +98,7 @@ export async function updateTemplateDraft(
       | "footer"
       | "buttons"
       | "requiresMetaApproval"
+      | "allowCategoryChange"
     >
   >,
   scope: CompanyScope
@@ -126,6 +129,9 @@ export async function updateTemplateDraft(
         : {}),
       ...(data.requiresMetaApproval !== undefined
         ? { requiresMetaApproval: data.requiresMetaApproval }
+        : {}),
+      ...(data.allowCategoryChange !== undefined
+        ? { allowCategoryChange: data.allowCategoryChange }
         : {}),
     },
   });

@@ -260,6 +260,7 @@ export const createTemplateSchema = z.object({
   footer: z.string().max(60).optional(),
   buttons: z.array(templateButtonSchema).max(3).optional(),
   requiresMetaApproval: z.boolean().default(true),
+  allowCategoryChange: z.boolean().default(false),
 });
 
 export const updateTemplateSchema = z.object({
@@ -271,6 +272,7 @@ export const updateTemplateSchema = z.object({
   footer: z.string().max(60).optional(),
   buttons: z.array(templateButtonSchema).max(3).optional(),
   requiresMetaApproval: z.boolean().optional(),
+  allowCategoryChange: z.boolean().optional(),
 });
 
 export const createContactOriginSchema = z.object({

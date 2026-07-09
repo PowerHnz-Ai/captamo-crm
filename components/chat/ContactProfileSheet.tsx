@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { ExternalLink, MessageCircle, X } from "lucide-react";
+import { Ban, ExternalLink, MessageCircle, X } from "lucide-react";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Select } from "@/components/ui/Select";
@@ -18,6 +18,7 @@ import {
   toDate,
 } from "@/lib/conversation-window";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
+import { appConfirm } from "@/lib/app-dialog";
 import { formatFirstResponseTime } from "@/lib/first-response";
 import type { Contact, ConversationListItem } from "@/lib/types";
 
@@ -146,6 +147,41 @@ export function ContactProfileSheet({
   const waLink = conversation.phone
     ? `https://wa.me/${conversation.phone.replace(/\D/g, "")}`
     : null;
+
+  /** LGPD: move o contato para a lista de excluídos — nunca mais recebe disparos. */
+  async function lgpdExclude() {
+    if (!contact?.id) return;
+    const confirmed = await appConfirm(
+      `Mover "${conversation.contactName || conversation.phone}" para a lista de excluídos? O contato sai da lista e NUNCA mais recebe disparos — mesmo que apareça em uma nova importação (conformidade LGPD).`,
+      {
+        title: "Excluir da lista (LGPD)",
+        destructive: true,
+        confirmLabel: "Excluir da lista",
+      }
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/contacts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: contact.id,
+          archived: true,
+          blocked: true,
+          optIn: false,
+        }),
+      });
+      const data = await parseApiJson<{ error?: string }>(res);
+      if (!res.ok) throw new Error(data.error || "Erro ao excluir da lista.");
+      onUpdated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao excluir da lista.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
@@ -311,6 +347,18 @@ export function ContactProfileSheet({
                   <MessageCircle className="h-4 w-4" />
                   Iniciar conversa (wa.me)
                 </a>
+              )}
+              {contact?.id && !contact.blocked && (
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => void lgpdExclude()}
+                  title="Sai da lista de contatos e nunca mais recebe disparos"
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-500/40 px-3 py-2 text-sm text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  <Ban className="h-4 w-4" />
+                  Excluir da lista (LGPD)
+                </button>
               )}
             </div>
           </section>

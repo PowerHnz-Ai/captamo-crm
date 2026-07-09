@@ -61,6 +61,8 @@ export interface TemplateDraft {
   name: string;
   language: string;
   category: string;
+  /** Se true, a Meta pode reclassificar a categoria em vez de reprovar. */
+  allowCategoryChange?: boolean;
   body: string;
   header?: {
     type: "NONE" | "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";

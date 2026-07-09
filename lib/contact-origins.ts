@@ -21,7 +21,7 @@ const SYSTEM_ORIGINS: Array<
     isSystem: true,
     fields: [
       { key: "mes_indicacao", label: "Mês da indicação", type: "month", required: true },
-      { key: "paciente_indicador", label: "Paciente Indicador", type: "contact_ref", required: true },
+      { key: "paciente_indicador", label: "Indicador", type: "contact_ref", required: true },
     ],
   },
   {

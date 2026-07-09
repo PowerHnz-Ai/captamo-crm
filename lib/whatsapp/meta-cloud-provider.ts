@@ -597,6 +597,9 @@ export class MetaCloudProvider implements WhatsAppProvider {
         name: draft.name,
         language: draft.language,
         category: draft.category,
+        // Sem o flag, categoria "errada" = template REPROVADO (não publica em
+        // outra categoria). Com o flag, a Meta reclassifica e aprova.
+        ...(draft.allowCategoryChange ? { allow_category_change: true } : {}),
         components,
       }),
     })) as { id?: string; status?: string };

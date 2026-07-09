@@ -158,6 +158,20 @@ export async function listClientCompanies(): Promise<CompanySummary[]> {
     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 }
 
+/** Renomeia a empresa (o nome vive só em companies/{id}.name no Firestore). */
+export async function renameClientCompany(
+  companyId: string,
+  name: string
+): Promise<void> {
+  const db = getDb();
+  const ref = db.collection("companies").doc(companyId);
+  const doc = await ref.get();
+  if (!doc.exists) {
+    throw new Error("Empresa não encontrada.");
+  }
+  await ref.update({ name: name.trim() });
+}
+
 export interface DeleteClientResult {
   companyId: string;
   usersDeleted: number;
@@ -248,7 +262,41 @@ export async function createTeamMember(
   const name = input.name.trim();
   const email = input.email.trim().toLowerCase();
 
-  const uid = await createAuthAccount(email, name);
+  let uid: string;
+  try {
+    uid = await createAuthAccount(email, name);
+  } catch (error) {
+    // A remoção de colaborador é soft (active:false) e a conta Auth permanece.
+    // Readicionar o mesmo e-mail REATIVA a conta na empresa, em vez de travar
+    // num 409 sem saída. E-mail de outra empresa continua bloqueado.
+    if (!(error instanceof ProvisioningError && error.status === 409)) {
+      throw error;
+    }
+    const existing = await getAdminAuth().getUserByEmail(email);
+    const docRef = db.collection("users").doc(existing.uid);
+    const doc = await docRef.get();
+    const data = doc.exists ? (doc.data() as { companyId?: string }) : null;
+    if (data?.companyId && data.companyId !== scope.companyId) {
+      throw new ProvisioningError(
+        "Este e-mail já pertence a outra empresa.",
+        409
+      );
+    }
+    await docRef.set(
+      {
+        name,
+        email,
+        companyId: scope.companyId,
+        role: input.role,
+        active: true,
+        updatedAt: Timestamp.now(),
+        ...(doc.exists ? {} : { createdAt: Timestamp.now() }),
+      },
+      { merge: true }
+    );
+    return { uid: existing.uid, email };
+  }
+
   await db.collection("users").doc(uid).set({
     name,
     email,

@@ -43,6 +43,7 @@ export async function POST(
       name: template.name,
       language: template.language,
       category: template.category,
+      allowCategoryChange: template.allowCategoryChange,
       body: template.body,
       header: template.header,
       variableSamples: template.variableSamples,

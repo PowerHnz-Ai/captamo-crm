@@ -277,6 +277,8 @@ export interface Template {
   provider?: ProviderType;
   metaTemplateId?: string;
   requiresMetaApproval?: boolean;
+  /** Permite a Meta reclassificar a categoria em vez de reprovar o template. */
+  allowCategoryChange?: boolean;
   submittedAt?: DateMillis;
   approvedAt?: DateMillis;
   rejectionReason?: string;
