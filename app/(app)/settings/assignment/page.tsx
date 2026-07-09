@@ -209,8 +209,8 @@ export default function AssignmentSettingsPage() {
                   </option>
                 </Select>
                 <p className="mt-1.5 text-xs text-app-muted">
-                  Só recebe quem está <strong>online</strong>. No horário de almoço, as conversas vão
-                  para quem ficou; quando a outra volta, volta a distribuir para as duas.
+                  Distribui entre as atendentes marcadas em "Atendentes elegíveis", esteja ela online
+                  ou não — a conversa fica atribuída e ela vê quando voltar.
                 </p>
               </div>
 

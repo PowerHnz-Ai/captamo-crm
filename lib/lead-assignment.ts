@@ -6,7 +6,6 @@ import type { CompanyScope } from "./firestore-repositories";
 import { getConversationById } from "./firestore-repositories";
 import { getEffectiveRole, normalizeRole } from "./roles";
 import { isUserActive, userDisplayName } from "./user-profiles";
-import { listCompanyPresence } from "./presence";
 import type { TeamUser, UserRole } from "./types";
 
 export type { TeamUser };
@@ -188,22 +187,6 @@ function filterEligibleAttendants(
   return attendants.filter((a) => allowed.has(a.uid));
 }
 
-/**
- * Só distribui para quem está online/away (presente). No almoço, quem sair fica
- * offline e não recebe; ao voltar, entra de novo no rodízio. Se NINGUÉM estiver
- * presente, cai de volta para todos os elegíveis para não deixar a conversa órfã.
- */
-async function filterPresentAttendants(
-  attendants: TeamUser[],
-  companyId: string
-): Promise<TeamUser[]> {
-  if (attendants.length === 0) return attendants;
-  const presence = await listCompanyPresence(companyId); // já exclui offline
-  const present = new Set(presence.map((p) => p.uid));
-  const online = attendants.filter((a) => present.has(a.uid));
-  return online.length > 0 ? online : attendants;
-}
-
 async function pickAssignee(
   attendants: TeamUser[],
   scope: CompanyScope,
@@ -267,11 +250,10 @@ export async function tryAssignOnInbound(
 
   if (!shouldReassign) return conversation.assignedTo || null;
 
-  const eligible = filterEligibleAttendants(
+  const attendants = filterEligibleAttendants(
     await listAttendants(scope),
     settings
   );
-  const attendants = await filterPresentAttendants(eligible, scope.companyId);
   const bestUid = await pickAssignee(attendants, scope, settings);
   if (!bestUid) return conversation.assignedTo || null;
 
