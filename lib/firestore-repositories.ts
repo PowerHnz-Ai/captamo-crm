@@ -87,7 +87,26 @@ export async function createOrGetContactByPhone(
 
     const updates: Prisma.ContactUpdateInput = {};
     let changed = false;
-    if (data?.name && data.name !== existing.name) {
+    // Nome: só promove placeholder (telefone/vazio) para um nome real — ex.:
+    // contato criado sem profile.name ganha o nome quando a Meta enviar.
+    // NUNCA sobrescreve nome editado pela clínica, e nunca rebaixa um nome
+    // real para telefone (callers usam o telefone como fallback de name).
+    const existingIsPlaceholder =
+      !existing.name ||
+      existing.name === existing.phone ||
+      existing.name === phone ||
+      (normalizedPhone ? existing.name === normalizedPhone : false);
+    const incomingIsRealName = Boolean(
+      data?.name &&
+        data.name !== phone &&
+        (normalizedPhone ? data.name !== normalizedPhone : true)
+    );
+    if (
+      existingIsPlaceholder &&
+      incomingIsRealName &&
+      data?.name &&
+      data.name !== existing.name
+    ) {
       updates.name = data.name;
       if (data.source !== undefined) updates.source = data.source;
       changed = true;

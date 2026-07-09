@@ -266,3 +266,14 @@ export async function resolveConnectionByInstanceId(
   });
   return row ? connectionFromRow(row) : null;
 }
+
+/** Resolve a conexão Meta pelo phone_number_id (usado no webhook oficial). */
+export async function resolveConnectionByPhoneNumberId(
+  companyId: string,
+  phoneNumberId: string
+): Promise<Connection | null> {
+  const row = await getSql().connection.findFirst({
+    where: { companyId, phoneNumberId },
+  });
+  return row ? connectionFromRow(row) : null;
+}

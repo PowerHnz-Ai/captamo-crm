@@ -6,6 +6,7 @@ import {
   canMonitorConversations,
   canReadConversationContent,
 } from "@/lib/permissions";
+import { getEffectiveRole } from "@/lib/roles";
 import { getSql } from "@/lib/db";
 
 /**
@@ -26,9 +27,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Atendente (member) só enxerga as próprias conversas + fila sem dono —
+    // o badge precisa espelhar o mesmo escopo da lista, senão mostra um
+    // número de conversas que ele não consegue ver.
+    const isMember = getEffectiveRole(context.auth) === "member";
     const groups = await getSql().conversation.groupBy({
       by: ["connectionId"],
-      where: { companyId: context.companyId, unreadCount: { gt: 0 } },
+      where: {
+        companyId: context.companyId,
+        unreadCount: { gt: 0 },
+        ...(isMember
+          ? { OR: [{ assignedTo: context.auth.uid }, { assignedTo: null }] }
+          : {}),
+      },
       _sum: { unreadCount: true },
     });
 

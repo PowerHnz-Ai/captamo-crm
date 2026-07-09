@@ -5,7 +5,10 @@ import {
   resolveCompanyByPhoneNumberId,
   resolveCompanyByWasenderSession,
 } from "./companies";
-import { resolveConnectionByInstanceId } from "./connections";
+import {
+  resolveConnectionByInstanceId,
+  resolveConnectionByPhoneNumberId,
+} from "./connections";
 
 export interface WebhookTarget {
   companyId: string;
@@ -49,7 +52,15 @@ export async function resolveWebhookTarget(
     const phoneNumberId = extractMetaPhoneNumberId(payload);
     if (phoneNumberId) {
       const companyId = await resolveCompanyByPhoneNumberId(phoneNumberId);
-      if (companyId) return { companyId };
+      if (companyId) {
+        // Carimba a conexão do número: sem isso a conversa nasce com
+        // connectionId NULL e só aparece na aba da conexão default.
+        const connection = await resolveConnectionByPhoneNumberId(
+          companyId,
+          phoneNumberId
+        );
+        return { companyId, connectionId: connection?.id };
+      }
       console.warn(
         "[webhook] phoneNumberId sem empresa cadastrada — evento descartado:",
         phoneNumberId
