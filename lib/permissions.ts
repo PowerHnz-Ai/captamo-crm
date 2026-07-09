@@ -19,6 +19,7 @@ export type Permission =
   | "conversations.read_content"
   | "conversations.monitor"
   | "conversations.reply"
+  | "conversations.delete"
   | "templates.manage"
   | "campaigns.manage"
   | "funnel.read"
@@ -47,6 +48,7 @@ const MATRIX: Record<UserRole, Permission[]> = {
     "conversations.read_content",
     "conversations.monitor",
     "conversations.reply",
+    "conversations.delete",
     "templates.manage",
     "campaigns.manage",
     "funnel.read",
@@ -69,7 +71,9 @@ const MATRIX: Record<UserRole, Permission[]> = {
     "contacts.read",
     "contacts.write",
     "contacts.import",
+    "conversations.read_content",
     "conversations.monitor",
+    "conversations.reply",
     "templates.manage",
     "campaigns.manage",
     "funnel.read",
@@ -85,7 +89,9 @@ const MATRIX: Record<UserRole, Permission[]> = {
     "reports.view",
     "contacts.read",
     "contacts.write",
+    "conversations.read_content",
     "conversations.monitor",
+    "conversations.reply",
     "templates.manage",
     "campaigns.manage",
     "funnel.read",
@@ -172,6 +178,10 @@ export function canReadConversationContent(ctx: RoleContext): boolean {
 
 export function canMonitorConversations(ctx: RoleContext): boolean {
   return can(ctx, "conversations.monitor");
+}
+
+export function canDeleteConversation(ctx: RoleContext): boolean {
+  return can(ctx, "conversations.delete");
 }
 
 export function canManageCampaigns(ctx: RoleContext): boolean {

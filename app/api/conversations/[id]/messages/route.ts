@@ -32,14 +32,32 @@ export async function GET(
       getContactById,
       listConversationMessages,
       markConversationRead,
+      logConversationAccess,
     } = await import("@/lib/firestore-repositories");
     const scope = { companyId: context.companyId };
 
-    if (getEffectiveRole(context.auth) === "member") {
+    const effectiveRole = getEffectiveRole(context.auth);
+    if (effectiveRole === "member") {
       const conversation = await getConversationById(id, scope);
       if (!conversation || !memberCanAccessConversation(context.auth, conversation)) {
         return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
       }
+    }
+
+    // Auditoria (LGPD): registra a leitura supervisória de gerente/líder. Fire-and-forget:
+    // nunca deve bloquear ou derrubar a resposta das mensagens.
+    if (effectiveRole === "gerente" || effectiveRole === "leader") {
+      void logConversationAccess(
+        id,
+        {
+          uid: context.auth.uid,
+          name: context.auth.name ?? context.auth.email ?? null,
+          role: effectiveRole,
+        },
+        scope
+      ).catch((err) => {
+        console.error("[conversation-access-log]", err);
+      });
     }
 
     const limitParam = request.nextUrl.searchParams.get("limit");

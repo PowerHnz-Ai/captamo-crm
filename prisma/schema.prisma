@@ -431,3 +431,19 @@ model Presence {
   @@id([companyId, uid])
   @@map("company_presence")
 }
+
+/// Auditoria de acesso a conversas: registra quem (gerente/líder) abriu qual
+/// conversa. Aberto para supervisão/treinamento, mantido para conformidade (LGPD).
+model ConversationAccessLog {
+  id             String   @id @default(cuid()) @db.VarChar(32)
+  companyId      String   @map("company_id") @db.VarChar(64)
+  conversationId String   @map("conversation_id") @db.VarChar(64)
+  userUid        String?  @map("user_uid") @db.VarChar(64)
+  userName       String?  @map("user_name") @db.VarChar(160)
+  role           String   @db.VarChar(32)
+  createdAt      DateTime @default(now()) @map("created_at") @db.DateTime(3)
+
+  @@index([companyId, conversationId])
+  @@index([companyId, createdAt])
+  @@map("conversation_access_log")
+}

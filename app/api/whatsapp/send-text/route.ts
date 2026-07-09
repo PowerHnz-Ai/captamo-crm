@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { conversationWindowMessage } from "@/lib/conversation-window";
 import { resolveCompanyContext } from "@/lib/request-company";
+import { requirePermission } from "@/lib/api-guard";
 import { incrementDailyStats } from "@/lib/stats-daily";
 import { applySenderNameToOutboundBody, userChatSignatureName } from "@/lib/user-display";
 import { messageSenderFromAuth } from "@/lib/user-profiles";
@@ -19,6 +20,11 @@ export async function POST(request: NextRequest) {
   const context = await resolveCompanyContext(request);
   if (!context) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
+  }
+
+  const perm = requirePermission(context.auth, "conversations.reply");
+  if (!perm.ok) {
+    return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
 
   try {

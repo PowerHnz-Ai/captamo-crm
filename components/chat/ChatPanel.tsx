@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, PanelRightOpen } from "lucide-react";
+import { ArrowLeft, Gauge, PanelRightOpen } from "lucide-react";
 import { MessageList } from "@/components/chat/MessageList";
 import { ChatComposer, type SendMessageOptions } from "@/components/chat/ChatComposer";
 import type { ConnectionOption } from "@/components/chat/ConnectionSwitcher";
 import { TemplatePanel, type TemplateSendPayload } from "@/components/chat/TemplatePanel";
 import { ContactProfileSheet } from "@/components/chat/ContactProfileSheet";
+import { ConversationMonitorSheet } from "@/components/chat/ConversationMonitorSheet";
 import { ConversationActionsMenu } from "@/components/chat/ConversationActionsMenu";
 import { ConversationLabels } from "@/components/chat/ConversationLabels";
 import { ChatSkeleton } from "@/components/chat/ChatSkeleton";
@@ -66,6 +67,7 @@ export function ChatPanel({
   const { can, role } = usePermissions();
   const [templateOpen, setTemplateOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [monitorOpen, setMonitorOpen] = useState(false);
   const [profileContact, setProfileContact] = useState<Contact | null>(null);
   const [templateContact, setTemplateContact] = useState<Contact | null>(null);
   const [pendingMessages, setPendingMessages] = useState<Message[]>([]);
@@ -660,6 +662,17 @@ export function ChatPanel({
               onDeleted={() => onConversationDeleted?.(conversation.id)}
             />
           )}
+          {can("conversations.monitor") && (
+            <button
+              type="button"
+              onClick={() => setMonitorOpen(true)}
+              className="rounded-lg border border-app-border p-2 hover:bg-white/5"
+              aria-label="Monitor da conversa"
+              title="Monitor da conversa"
+            >
+              <Gauge className="h-4 w-4" />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setTemplateOpen((v) => !v)}
@@ -783,6 +796,14 @@ export function ChatPanel({
           canReassign={canAssignAnyone}
           currentUid={currentUid}
           onConversationUpdated={onConversationUpdated}
+        />
+      )}
+
+      {monitorOpen && conversation && (
+        <ConversationMonitorSheet
+          conversation={conversation}
+          open={monitorOpen}
+          onClose={() => setMonitorOpen(false)}
         />
       )}
     </div>

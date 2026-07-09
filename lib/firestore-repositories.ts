@@ -740,6 +740,26 @@ export async function saveInternalNote(
   return messageFromRow(row);
 }
 
+/**
+ * Auditoria (LGPD): registra que um supervisor (gerente/líder) abriu uma conversa.
+ * Chamado fire-and-forget — falha aqui nunca deve derrubar a leitura do chat.
+ */
+export async function logConversationAccess(
+  conversationId: string,
+  actor: { uid?: string | null; name?: string | null; role: string },
+  scope: CompanyScope
+): Promise<void> {
+  await getSql().conversationAccessLog.create({
+    data: {
+      companyId: scope.companyId,
+      conversationId,
+      userUid: actor.uid ?? null,
+      userName: actor.name ?? null,
+      role: actor.role,
+    },
+  });
+}
+
 /** Garante connectionId na conversa (usa conexão default se ausente). */
 export async function ensureConversationConnection(
   conversation: Conversation,

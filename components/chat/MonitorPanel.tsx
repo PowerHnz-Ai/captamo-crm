@@ -1,10 +1,7 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
-import { ptBR } from "date-fns/locale";
 import { Badge } from "@/components/ui/Badge";
-import { isWithinConversationWindow, toDate } from "@/lib/conversation-window";
-import { formatFirstResponseTime } from "@/lib/first-response";
+import { ConversationMonitorSummary } from "@/components/chat/ConversationMonitorSummary";
 import type { ConversationListItem } from "@/lib/types";
 
 interface MonitorPanelProps {
@@ -39,16 +36,6 @@ export function MonitorPanel({
     );
   }
 
-  const windowOpen = isWithinConversationWindow(conversation.lastInboundAt);
-  const lastDate = toDate(conversation.lastMessageAt as Parameters<typeof toDate>[0]);
-  const lastAt = lastDate
-    ? formatDistanceToNow(lastDate, { addSuffix: true, locale: ptBR })
-    : "—";
-  const firstResponseLabel = formatFirstResponseTime(
-    conversation.firstResponseAt,
-    conversation.createdAt
-  );
-
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-3 border-b border-app-border px-4 py-3">
@@ -72,35 +59,7 @@ export function MonitorPanel({
 
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
         <div className="mx-auto max-w-lg space-y-4">
-          <div className="rounded-xl border border-app-border bg-app-secondary/30 p-4">
-            <h3 className="mb-3 text-sm font-semibold text-app-text">Resumo da conversa</h3>
-            <dl className="space-y-2 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Status</dt>
-                <dd>{conversation.status === "open" ? "Aberta" : "Fechada"}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Janela 24h</dt>
-                <dd>{windowOpen ? "Aberta" : "Fechada"}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Último evento</dt>
-                <dd>{lastAt}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Atendente</dt>
-                <dd>{conversation.assignedToName || "Não atribuído"}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Primeira resposta</dt>
-                <dd>{firstResponseLabel || "Sem resposta"}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-app-muted">Não lidas</dt>
-                <dd>{conversation.unreadCount || 0}</dd>
-              </div>
-            </dl>
-          </div>
+          <ConversationMonitorSummary conversation={conversation} />
 
           <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-200/90">
             O conteúdo das mensagens não é exibido no modo monitor. Apenas metadados da

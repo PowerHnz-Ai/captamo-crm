@@ -8,6 +8,7 @@ import { resolveCompanyContext } from "@/lib/request-company";
 import {
   canMonitorConversations,
   canReadConversationContent,
+  canDeleteConversation,
   can,
 } from "@/lib/permissions";
 import { getEffectiveRole } from "@/lib/roles";
@@ -254,7 +255,9 @@ export async function DELETE(
   }
 
   const auth = context.auth;
-  if (!canReadConversationContent(auth)) {
+  // Excluir conversa é ação destrutiva restrita ao admin da empresa. Gerente/líder
+  // leem e respondem (têm read_content), mas não apagam; atendente também não.
+  if (!canDeleteConversation(auth)) {
     return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
   }
 
@@ -269,17 +272,6 @@ export async function DELETE(
     });
     if (!conversation) {
       return NextResponse.json({ error: "Conversa não encontrada." }, { status: 404 });
-    }
-
-    const role = getEffectiveRole(auth);
-    const canAssignAnyone = role !== "member" && can(auth, "team.view");
-
-    if (
-      !canAssignAnyone &&
-      getEffectiveRole(auth) === "member" &&
-      !memberCanModifyConversation(auth, conversation)
-    ) {
-      return NextResponse.json({ error: "Sem permissão." }, { status: 403 });
     }
 
     const removed = await deleteConversation(id, {
