@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveCompanyContext } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
+import { requirePlatformAdmin } from "@/lib/platform-admin";
 import {
   getConnection,
   deleteConnection,
@@ -19,7 +20,7 @@ export async function GET(
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.view");
+  const perm = requirePermission(context.auth, "connections.view");
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
@@ -42,7 +43,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.manage");
+  const perm = requirePermission(context.auth, "connections.manage");
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
@@ -51,6 +52,14 @@ export async function DELETE(
   const connection = await getConnection(context.companyId, id);
   if (!connection) {
     return NextResponse.json({ error: "Conexão não encontrada." }, { status: 404 });
+  }
+
+  // Conexão oficial (meta_cloud) é da Captamo — só o admin da plataforma exclui.
+  if (connection.provider === "meta_cloud") {
+    const official = requirePlatformAdmin(context.auth);
+    if (!official.ok) {
+      return NextResponse.json({ error: official.error }, { status: official.status });
+    }
   }
 
   if (connection.instanceId) {

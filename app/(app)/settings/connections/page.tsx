@@ -43,8 +43,8 @@ const STATUS_LABEL: Record<ConnectionRow["status"], string> = {
 
 export default function ConnectionsPage() {
   const { can } = usePermissions();
-  const canView = can("integrations.view");
-  const canManage = can("integrations.manage");
+  const canView = can("connections.view");
+  const canManage = can("connections.manage");
 
   const [connections, setConnections] = useState<ConnectionRow[]>([]);
   const [loading, setLoading] = useState(true);

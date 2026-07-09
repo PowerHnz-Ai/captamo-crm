@@ -2,12 +2,11 @@ import { getEffectiveRole, type RoleContext } from "./roles";
 import type { UserRole } from "./types";
 
 export type Permission =
-  | "hub.access"
   | "dashboard.view"
   | "reports.view"
   | "reports.view_own"
-  | "integrations.view"
-  | "integrations.manage"
+  | "connections.view"
+  | "connections.manage"
   | "team.view"
   | "team.view_online"
   | "team.manage_roles"
@@ -23,91 +22,48 @@ export type Permission =
   | "templates.manage"
   | "campaigns.manage"
   | "funnel.read"
-  | "funnel.write"
-  | "checklist.tasks_own"
-  | "checklist.tasks_team"
-  | "checklist.tasks_delete_any"
-  | "checklist.team_panel"
-  | "checklist.working_days";
+  | "funnel.write";
+
+// Modelo enxuto (3 rótulos, 2 tiers):
+//   member  = "Atendente"  → operacional restrito, escopado às próprias conversas.
+//   leader  = "Supervisor" |
+//   gerente = "Líder"      | mesmo poder (tier completo). Muda só o rótulo.
+//   admin   = interno (impersonation da Captamo = poder total).
+// A API oficial (Meta) NÃO é permissão de papel — é gateada por platform admin.
+const FULL_TIER: Permission[] = [
+  "dashboard.view",
+  "reports.view",
+  "connections.view",
+  "connections.manage",
+  "team.view",
+  "team.view_online",
+  "team.manage_roles",
+  "origins.manage",
+  "lists.manage",
+  "contacts.read",
+  "contacts.write",
+  "contacts.import",
+  "conversations.read_content",
+  "conversations.monitor",
+  "conversations.reply",
+  "conversations.delete",
+  "templates.manage",
+  "campaigns.manage",
+  "funnel.read",
+  "funnel.write",
+];
 
 const MATRIX: Record<UserRole, Permission[]> = {
-  admin: [
-    "hub.access",
-    "dashboard.view",
-    "reports.view",
-    "integrations.view",
-    "integrations.manage",
-    "team.view",
-    "team.view_online",
-    "team.manage_roles",
-    "origins.manage",
-    "lists.manage",
-    "contacts.read",
-    "contacts.write",
-    "contacts.import",
-    "conversations.read_content",
-    "conversations.monitor",
-    "conversations.reply",
-    "conversations.delete",
-    "templates.manage",
-    "campaigns.manage",
-    "funnel.read",
-    "funnel.write",
-    "checklist.tasks_own",
-    "checklist.tasks_team",
-    "checklist.tasks_delete_any",
-    "checklist.team_panel",
-    "checklist.working_days",
-  ],
-  gerente: [
-    "hub.access",
-    "dashboard.view",
-    "reports.view",
-    "team.view",
-    "team.view_online",
-    "team.manage_roles",
-    "origins.manage",
-    "lists.manage",
-    "contacts.read",
-    "contacts.write",
-    "contacts.import",
-    "conversations.read_content",
-    "conversations.monitor",
-    "conversations.reply",
-    "templates.manage",
-    "campaigns.manage",
-    "funnel.read",
-    "funnel.write",
-    "checklist.tasks_own",
-    "checklist.tasks_team",
-    "checklist.tasks_delete_any",
-    "checklist.team_panel",
-  ],
-  leader: [
-    "hub.access",
-    "dashboard.view",
-    "reports.view",
-    "contacts.read",
-    "contacts.write",
-    "conversations.read_content",
-    "conversations.monitor",
-    "conversations.reply",
-    "templates.manage",
-    "campaigns.manage",
-    "funnel.read",
-    "funnel.write",
-    "checklist.tasks_own",
-    "checklist.tasks_team",
-  ],
+  admin: FULL_TIER,
+  gerente: FULL_TIER, // Líder
+  leader: FULL_TIER, // Supervisor
   member: [
-    "hub.access",
     "dashboard.view",
     "reports.view_own",
     "contacts.read",
     "conversations.read_content",
     "conversations.reply",
     "funnel.read",
-    "checklist.tasks_own",
   ],
 };
 
@@ -124,8 +80,12 @@ export function isAdminRole(ctx: RoleContext): boolean {
   return getEffectiveRole(ctx) === "admin";
 }
 
-export function canManageIntegrations(ctx: RoleContext): boolean {
-  return can(ctx, "integrations.manage");
+export function canViewConnections(ctx: RoleContext): boolean {
+  return can(ctx, "connections.view");
+}
+
+export function canManageConnections(ctx: RoleContext): boolean {
+  return can(ctx, "connections.manage");
 }
 
 export function canViewTeam(ctx: RoleContext): boolean {
@@ -142,9 +102,10 @@ export function canManageTeamRoles(ctx: RoleContext): boolean {
 
 /**
  * Teto de promoção: quem pode conceder qual papel.
- * - admin (ou platform admin): qualquer papel, inclusive admin.
- * - gerente: até gerente (member | leader | gerente); nunca admin.
- * - demais papéis: nenhum.
+ * - platform admin: qualquer papel.
+ * - tier completo (Líder/Supervisor, e o admin interno): qualquer papel da
+ *   clínica (Atendente/Supervisor/Líder), mas não o admin interno.
+ * - Atendente: nenhum.
  */
 export function canAssignRole(
   actor: RoleContext & { platformAdmin?: boolean },
@@ -152,14 +113,13 @@ export function canAssignRole(
 ): boolean {
   if (actor.platformAdmin) return true;
   const actorRole = getEffectiveRole(actor);
-  if (actorRole === "admin") return true;
-  if (actorRole === "gerente") return targetRole !== "admin";
-  return false;
+  if (actorRole === "member") return false;
+  return targetRole !== "admin";
 }
 
 /**
- * Um gerente não pode editar/remover/redefinir senha de um admin (protege os
- * já criados). Admin e platform admin podem gerenciar qualquer usuário.
+ * Tier completo (Líder/Supervisor) gerencia qualquer usuário da clínica, exceto
+ * o admin interno. Atendente não gerencia ninguém. Platform admin sempre pode.
  */
 export function canManageUser(
   actor: RoleContext & { platformAdmin?: boolean },
@@ -167,9 +127,8 @@ export function canManageUser(
 ): boolean {
   if (actor.platformAdmin) return true;
   const actorRole = getEffectiveRole(actor);
-  if (actorRole === "admin") return true;
-  if (actorRole === "gerente") return getEffectiveRole(target) !== "admin";
-  return false;
+  if (actorRole === "member") return false;
+  return getEffectiveRole(target) !== "admin";
 }
 
 export function canReadConversationContent(ctx: RoleContext): boolean {

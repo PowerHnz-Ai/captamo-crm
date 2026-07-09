@@ -142,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            currentSurface: pathname === "/hub" ? "hub" : "api",
+            currentSurface: "api",
             currentPath: pathname,
           }),
         });
@@ -165,35 +165,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (user && pathname === "/login") {
-      router.replace("/hub");
+      router.replace(
+        profile?.platformAdmin && !getImpersonation() ? "/platform" : "/"
+      );
       return;
     }
 
     const platformPath = pathname.startsWith("/platform");
 
-    // Painel da plataforma: só para platform admins (fora do guard de modo).
+    // Painel da plataforma: só para platform admins.
     if (user && platformPath) {
       if (profile && !profile.platformAdmin) {
-        router.replace("/hub");
+        router.replace("/");
       }
       return;
     }
 
-    // Platform admin sem impersonação ativa: o hub vira /platform.
-    if (user && pathname === "/hub" && profile?.platformAdmin && !getImpersonation()) {
+    // Platform admin sem impersonação ativa: a home dele é o /platform.
+    if (
+      user &&
+      profile?.platformAdmin &&
+      !getImpersonation() &&
+      !platformPath &&
+      pathname !== "/login"
+    ) {
       router.replace("/platform");
       return;
-    }
-
-    if (user && pathname !== "/hub" && pathname !== "/login") {
-      const mode = getUltraMode();
-      const settingsPath = pathname.startsWith("/settings");
-
-      // Sem app escolhido ainda: manda para o hub (exceto telas de settings).
-      if (!mode && !settingsPath) {
-        router.replace("/hub");
-        return;
-      }
     }
   }, [user, loading, pathname, router, profile]);
 

@@ -18,11 +18,12 @@ import { roleLabel, getEffectiveRole } from "@/lib/roles";
 import { sendResetEmail } from "@/lib/password-actions";
 import type { UserRole } from "@/lib/types";
 
+// 3 papéis da clínica (admin é interno da Captamo, fora do seletor).
+// gerente=Líder e leader=Supervisor têm o mesmo poder; muda só o rótulo.
 const ROLE_OPTIONS: Array<{ value: UserRole; label: string }> = [
-  { value: "admin", label: "Administrador" },
-  { value: "gerente", label: "Gerente" },
-  { value: "leader", label: "Líder" },
-  { value: "member", label: "Colaborador" },
+  { value: "member", label: "Atendente" },
+  { value: "leader", label: "Supervisor" },
+  { value: "gerente", label: "Líder" },
 ];
 
 type TeamMember = {

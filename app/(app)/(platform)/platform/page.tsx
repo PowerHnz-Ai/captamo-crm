@@ -48,7 +48,7 @@ export default function PlatformPage() {
 
   useEffect(() => {
     if (!authLoading && !isPlatformAdmin) {
-      router.replace("/hub");
+      router.replace("/");
     }
   }, [authLoading, isPlatformAdmin, router]);
 

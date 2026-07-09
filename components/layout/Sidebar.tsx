@@ -14,7 +14,6 @@ import {
   BarChart3,
   GitBranch,
   Settings,
-  ArrowLeftRight,
   ChevronDown,
   List,
   MapPin,
@@ -41,6 +40,8 @@ type NavItem = {
   label: string;
   icon: typeof LayoutDashboard;
   permission?: Permission;
+  /** Só aparece para o admin da plataforma (Captamo), ex.: API oficial. */
+  platformAdminOnly?: boolean;
 };
 
 const mainNavItems: NavItem[] = [
@@ -56,15 +57,15 @@ const mainNavItems: NavItem[] = [
 const settingsNavItems: NavItem[] = [
   {
     href: "/settings/integrations",
-    label: "Integrações",
+    label: "API oficial",
     icon: Settings,
-    permission: "integrations.view",
+    platformAdminOnly: true,
   },
   {
     href: "/settings/connections",
     label: "Conexões",
     icon: Smartphone,
-    permission: "integrations.view",
+    permission: "connections.view",
   },
   { href: "/settings/team", label: "Equipe", icon: Users, permission: "team.view" },
   { href: "/settings/profile", label: "Meu perfil", icon: UserCircle },
@@ -193,7 +194,9 @@ export function Sidebar({ onlineCount }: SidebarProps) {
     (item) => !item.permission || can(item.permission)
   );
   const visibleSettings = settingsNavItems.filter(
-    (item) => !item.permission || can(item.permission)
+    (item) =>
+      (!item.platformAdminOnly || profile?.platformAdmin) &&
+      (!item.permission || can(item.permission))
   );
   const showSettings = visibleSettings.length > 0;
 
@@ -285,17 +288,6 @@ export function Sidebar({ onlineCount }: SidebarProps) {
           </div>
         )}
       </nav>
-
-      <Link
-        href="/hub"
-        title={collapsed ? "Trocar produto" : undefined}
-        className={`mt-4 flex min-w-0 items-center rounded-xl border border-app-border bg-app-secondary/60 py-2.5 text-sm text-app-subtle transition-colors hover:border-app-accent/30 hover:text-app-text ${
-          collapsed ? "justify-center px-2" : "gap-2 px-3"
-        }`}
-      >
-        <ArrowLeftRight className="h-4 w-4 shrink-0" />
-        {!collapsed && <span className="truncate">Trocar produto</span>}
-      </Link>
 
       <div className="mt-4 min-w-0 border-t border-app-border pt-4">
         {!collapsed ? (

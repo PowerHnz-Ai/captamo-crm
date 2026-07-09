@@ -190,7 +190,7 @@ export default function AssignmentSettingsPage() {
 
               <div>
                 <label className="mb-1.5 block text-sm font-medium text-app-subtle">
-                  Estratégia
+                  Como distribuir as conversas novas
                 </label>
                 <Select
                   value={settings.strategy}
@@ -201,9 +201,17 @@ export default function AssignmentSettingsPage() {
                     })
                   }
                 >
-                  <option value="least_load">Menor carga (últimos dias)</option>
-                  <option value="round_robin">Rodízio simples</option>
+                  <option value="least_load">
+                    Equilibrar por carga — vai para quem tem menos conversas abertas
+                  </option>
+                  <option value="round_robin">
+                    Rodízio — alterna em ordem entre as atendentes
+                  </option>
                 </Select>
+                <p className="mt-1.5 text-xs text-app-muted">
+                  Só recebe quem está <strong>online</strong>. No horário de almoço, as conversas vão
+                  para quem ficou; quando a outra volta, volta a distribuir para as duas.
+                </p>
               </div>
 
               <Input
@@ -252,7 +260,7 @@ export default function AssignmentSettingsPage() {
             <Card className="p-6">
               <h3 className="font-medium">Atendentes elegíveis</h3>
               <p className="mt-1 text-sm text-app-subtle">
-                Deixe vazio para incluir todos os colaboradores (membros).
+                Deixe vazio para incluir todas as atendentes.
               </p>
               <ul className="mt-4 space-y-2">
                 {members.length === 0 ? (

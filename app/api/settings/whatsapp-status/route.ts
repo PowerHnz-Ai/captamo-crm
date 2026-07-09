@@ -11,9 +11,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
 
-  const perm = requirePermission(authResult.context.auth, "integrations.view");
-  if (!perm.ok) {
-    return NextResponse.json({ error: perm.error }, { status: perm.status });
+  // Banner de status na página de Conexões (só leitura, sem segredo). Basta
+  // ver conexões — Líder/Supervisor têm; a Captamo impersonando também.
+  const canConnections = requirePermission(authResult.context.auth, "connections.view");
+  if (!canConnections.ok) {
+    return NextResponse.json(
+      { error: canConnections.error },
+      { status: canConnections.status }
+    );
   }
 
   try {

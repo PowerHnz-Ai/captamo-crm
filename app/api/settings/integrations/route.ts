@@ -5,7 +5,7 @@ import { getWhatsAppConfig, updateCompanyWhatsAppConfig } from "@/lib/companies"
 import { getIntegrationEnvStatus, isProductionWebhookUrl, checkWebhookUrlReachability } from "@/lib/integration-env";
 import { getMessagingLimitStatus } from "@/lib/messaging-limits";
 import { resolveCompanyContext } from "@/lib/request-company";
-import { requirePermission } from "@/lib/api-guard";
+import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { getWhatsAppProvider } from "@/lib/whatsapp";
 import { updateIntegrationSchema } from "@/lib/validators";
 import { listRecentWebhookEvents } from "@/lib/webhook-log";
@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.view");
+  const perm = requirePlatformAdmin(context.auth);
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
@@ -82,7 +82,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.manage");
+  const perm = requirePlatformAdmin(context.auth);
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.view");
+  const perm = requirePlatformAdmin(context.auth);
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }

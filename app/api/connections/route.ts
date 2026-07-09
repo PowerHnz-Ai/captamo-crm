@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { resolveCompanyContext } from "@/lib/request-company";
 import { requirePermission } from "@/lib/api-guard";
+import { requirePlatformAdmin } from "@/lib/platform-admin";
 import { createConnectionSchema } from "@/lib/validators";
 import {
   createConnection,
@@ -19,12 +20,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const canViewIntegrations = requirePermission(context.auth, "integrations.view");
+  const canViewConnections = requirePermission(context.auth, "connections.view");
   const canReply = requirePermission(context.auth, "conversations.reply");
-  if (!canViewIntegrations.ok && !canReply.ok) {
+  if (!canViewConnections.ok && !canReply.ok) {
     return NextResponse.json(
-      { error: canViewIntegrations.error || canReply.error },
-      { status: canViewIntegrations.status || canReply.status }
+      { error: canViewConnections.error || canReply.error },
+      { status: canViewConnections.status || canReply.status }
     );
   }
 
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.manage");
+  const perm = requirePermission(context.auth, "connections.manage");
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }
@@ -53,6 +54,16 @@ export async function POST(request: NextRequest) {
   }
 
   const { label, provider, baseUrl, phoneNumberId, wabaId } = parsed.data;
+
+  // Guard oficial: criar conexão NÃO-Evolution (ex.: meta_cloud) é da Captamo.
+  // Líder/Supervisor só criam Evolution (não oficial).
+  if (provider !== "evolution") {
+    const official = requirePlatformAdmin(context.auth);
+    if (!official.ok) {
+      return NextResponse.json({ error: official.error }, { status: official.status });
+    }
+  }
+
   const generatedInstanceId =
     parsed.data.instanceId ||
     `ultra_${context.companyId.slice(0, 6)}_${crypto.randomUUID().slice(0, 8)}`;

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
-import { usePermissions } from "@/hooks/usePermissions";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { appAlert } from "@/lib/app-dialog";
 import { apiFetch } from "@/lib/api-fetch";
 
@@ -51,9 +51,11 @@ interface WebhookEventRow {
 }
 
 export default function IntegrationsPage() {
-  const { can } = usePermissions();
-  const canView = can("integrations.view");
-  const canManage = can("integrations.manage");
+  // API oficial é responsabilidade da Captamo: só o admin da plataforma
+  // (inclusive impersonando uma clínica) configura aqui.
+  const { profile } = useAuth();
+  const canView = profile?.platformAdmin === true;
+  const canManage = profile?.platformAdmin === true;
   const [config, setConfig] = useState({
     provider: "meta_cloud",
     phoneNumberId: "",
@@ -103,7 +105,7 @@ export default function IntegrationsPage() {
   if (!canView) {
     return (
       <AppShell title="Integrações" subtitle="Configuração WhatsApp">
-        <p className="text-app-subtle">Apenas administradores podem acessar integrações.</p>
+        <p className="text-app-subtle">A API oficial é configurada pela equipe Captamo.</p>
       </AppShell>
     );
   }

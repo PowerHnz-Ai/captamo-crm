@@ -1,10 +1,12 @@
 import type { UserRole } from "./types";
 
+// Modelo enxuto: 3 rótulos visíveis (gerente=Líder, leader=Supervisor,
+// member=Atendente). "admin" é interno (impersonation da Captamo).
 const ROLE_LABELS: Record<UserRole, string> = {
   admin: "Administrador",
-  gerente: "Gerente",
-  leader: "Líder",
-  member: "Colaborador",
+  gerente: "Líder",
+  leader: "Supervisor",
+  member: "Atendente",
 };
 
 export function normalizeRole(role?: string | null, cargo?: string | null): UserRole {

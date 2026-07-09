@@ -18,7 +18,7 @@ export async function POST(
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
 
-  const perm = requirePermission(context.auth, "integrations.manage");
+  const perm = requirePermission(context.auth, "connections.manage");
   if (!perm.ok) {
     return NextResponse.json({ error: perm.error }, { status: perm.status });
   }

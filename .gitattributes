@@ -1,0 +1,25 @@
+# Normaliza quebras de linha para evitar CRLF em scripts que rodam na VPS (Linux).
+# O deploy quebrava com "set: pipefail: invalid option name" quando os .sh iam
+# do Windows com CRLF. Força LF nesses arquivos independentemente do SO do dev.
+
+* text=auto eol=lf
+
+# Scripts executados em shells POSIX na VPS — sempre LF.
+*.sh text eol=lf
+
+# Scripts nativos do Windows — mantêm CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binários — nunca normalizar.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.gz binary
+*.zip binary
