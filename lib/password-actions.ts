@@ -18,6 +18,26 @@ export async function sendResetEmail(email: string): Promise<void> {
 }
 
 /**
+ * Preferencial: e-mail de redefinição com o template da Captamo (português,
+ * remetente próprio, via rota do servidor). Se o SMTP estiver indisponível,
+ * cai automaticamente no e-mail nativo do Firebase — ninguém fica sem link.
+ */
+export async function sendResetEmailSmart(email: string): Promise<void> {
+  try {
+    const res = await fetch("/api/auth/password-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim() }),
+    });
+    const data = (await res.json()) as { sent?: boolean };
+    if (res.ok && data.sent) return;
+  } catch {
+    // servidor fora — usa o fallback abaixo
+  }
+  await sendResetEmail(email);
+}
+
+/**
  * Troca a senha do usuário logado. Reautentica com a senha atual (exigência do
  * Firebase para operações sensíveis) e então grava a nova.
  */

@@ -99,14 +99,16 @@ export default function PlatformPage() {
       const data = await parseApiJson<{
         companyId?: string;
         managerEmail?: string;
+        emailSent?: boolean;
         error?: string;
       }>(res);
       if (!res.ok) throw new Error(data.error || "Erro ao cadastrar cliente.");
 
-      // Dispara o e-mail de definição de senha do gerente (Firebase).
+      // O servidor já envia as boas-vindas da Captamo; o e-mail nativo do
+      // Firebase é só fallback quando o SMTP está indisponível.
       let emailNote = "";
       try {
-        if (data.managerEmail) await sendResetEmail(data.managerEmail);
+        if (data.managerEmail && !data.emailSent) await sendResetEmail(data.managerEmail);
         emailNote = "\n\nUm e-mail para definir a senha foi enviado ao gerente.";
       } catch {
         emailNote =

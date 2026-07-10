@@ -5,7 +5,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { UltraWordmark } from "@/components/brand/UltraWordmark";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { sendResetEmail, passwordErrorMessage } from "@/lib/password-actions";
+import { sendResetEmailSmart, passwordErrorMessage } from "@/lib/password-actions";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -36,7 +36,7 @@ export default function LoginPage() {
     setResetLoading(true);
     setError("");
     try {
-      await sendResetEmail(email);
+      await sendResetEmailSmart(email);
       setResetDone(true);
     } catch (err) {
       // Mensagem neutra: não revela se o e-mail existe.

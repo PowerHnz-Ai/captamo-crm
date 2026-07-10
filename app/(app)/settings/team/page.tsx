@@ -15,7 +15,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { appAlert, appConfirm } from "@/lib/app-dialog";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
 import { roleLabel, getEffectiveRole } from "@/lib/roles";
-import { sendResetEmail } from "@/lib/password-actions";
+import { sendResetEmail, sendResetEmailSmart } from "@/lib/password-actions";
 import type { UserRole } from "@/lib/types";
 
 // 3 papéis da clínica (admin é interno da Captamo, fora do seletor).
@@ -85,12 +85,18 @@ export default function TeamSettingsPage() {
           role: addRole,
         }),
       });
-      const data = await parseApiJson<{ email?: string; error?: string }>(res);
+      const data = await parseApiJson<{
+        email?: string;
+        emailSent?: boolean;
+        error?: string;
+      }>(res);
       if (!res.ok) throw new Error(data.error || "Erro ao criar colaborador.");
 
       let note = "";
       try {
-        if (data.email) await sendResetEmail(data.email);
+        // O servidor já envia o e-mail de boas-vindas da Captamo; o fallback
+        // nativo do Firebase só roda se o SMTP estiver indisponível.
+        if (data.email && !data.emailSent) await sendResetEmail(data.email);
         note = "\n\nUm e-mail para definir a senha foi enviado.";
       } catch {
         note =
@@ -119,7 +125,7 @@ export default function TeamSettingsPage() {
     );
     if (!confirmed) return;
     try {
-      await sendResetEmail(email);
+      await sendResetEmailSmart(email);
       await appAlert("E-mail de redefinição enviado.", { variant: "success" });
     } catch {
       await appAlert("Não foi possível enviar o e-mail agora.", {

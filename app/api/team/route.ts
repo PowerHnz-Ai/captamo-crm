@@ -73,11 +73,19 @@ export async function POST(request: NextRequest) {
     const created = await createTeamMember(parsed.data, scope);
     const user = await getTeamUser(created.uid, scope);
 
+    // E-mail de boas-vindas da Captamo (template próprio). Se o SMTP estiver
+    // indisponível, emailSent=false e o cliente cai no e-mail nativo do Firebase.
+    const { sendPasswordEmail } = await import("@/lib/password-email");
+    const emailResult = await sendPasswordEmail(created.email, "welcome", {
+      name: parsed.data.name,
+    });
+
     return NextResponse.json(
       {
         ok: true,
-        // e-mail retornado para o cliente disparar sendPasswordResetEmail.
+        // e-mail retornado para o fallback do cliente (sendPasswordResetEmail).
         email: created.email,
+        emailSent: emailResult === "sent",
         user: user ? await serializeTeamUserAsync(user) : null,
       },
       { status: 201 }
