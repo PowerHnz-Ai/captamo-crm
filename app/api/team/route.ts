@@ -80,12 +80,16 @@ export async function POST(request: NextRequest) {
       name: parsed.data.name,
     });
 
+    // IMPORTANTE: `email` só volta quando o envio próprio NÃO ocorreu — é o
+    // gatilho do fallback nativo no cliente. Se voltasse sempre, um front
+    // antigo (cache) dispararia o e-mail do Firebase em duplicidade, e o novo
+    // código invalidaria o link do e-mail da Captamo.
+    const emailSent = emailResult === "sent";
     return NextResponse.json(
       {
         ok: true,
-        // e-mail retornado para o fallback do cliente (sendPasswordResetEmail).
-        email: created.email,
-        emailSent: emailResult === "sent",
+        email: emailSent ? undefined : created.email,
+        emailSent,
         user: user ? await serializeTeamUserAsync(user) : null,
       },
       { status: 201 }

@@ -46,13 +46,16 @@ export async function POST(request: NextRequest) {
       name: parsed.data.managerName,
     });
 
+    // `managerEmail` só volta quando o envio próprio NÃO ocorreu — evita que
+    // um front antigo (cache) dispare o e-mail nativo em duplicidade e
+    // invalide o link do e-mail da Captamo.
+    const emailSent = emailResult === "sent";
     return NextResponse.json(
       {
         ok: true,
         companyId: result.companyId,
-        // e-mail retornado para o fallback do cliente (sendPasswordResetEmail).
-        managerEmail: result.managerEmail,
-        emailSent: emailResult === "sent",
+        managerEmail: emailSent ? undefined : result.managerEmail,
+        emailSent,
       },
       { status: 201 }
     );
