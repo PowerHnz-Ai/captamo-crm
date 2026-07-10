@@ -53,9 +53,14 @@ export async function resolveConnectionConfig(
     }),
   ]);
 
+  // O segredo em company_settings é o TOKEN META da empresa — só vale para
+  // meta_cloud. Se cair como apikey de uma conexão Evolution/Wasender, o
+  // servidor devolve 401 Unauthorized.
   const apiKey =
     tryDecrypt(connection.companyId, connSecret?.apiKeySecret) ||
-    tryDecrypt(connection.companyId, settings?.apiKeySecret) ||
+    (connection.provider === "meta_cloud"
+      ? tryDecrypt(connection.companyId, settings?.apiKeySecret)
+      : undefined) ||
     resolveConnectionApiKey(connection.apiKeyRef);
 
   return {
