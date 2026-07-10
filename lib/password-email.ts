@@ -30,11 +30,15 @@ export async function sendPasswordEmail(
 
   let link: string;
   try {
-    link = await getAdminAuth().generatePasswordResetLink(email, {
+    const generated = await getAdminAuth().generatePasswordResetLink(email, {
       url: `${appUrl}/login`,
     });
-    // Página de redefinição hospedada pelo Firebase — força português.
-    link += link.includes("?") ? "&lang=pt" : "?lang=pt";
+    // Troca a página branca hospedada pelo Firebase pela NOSSA tela de
+    // definição de senha (identidade Captamo) — o oobCode é o mesmo.
+    const oobCode = new URL(generated).searchParams.get("oobCode");
+    link = oobCode
+      ? `${appUrl}/auth/action?mode=resetPassword&oobCode=${encodeURIComponent(oobCode)}`
+      : `${generated}&lang=pt`;
   } catch (error) {
     // Tipicamente auth/user-not-found — não revelar existência ao usuário.
     console.warn("[password-email] link não gerado (e-mail desconhecido?):", error);
