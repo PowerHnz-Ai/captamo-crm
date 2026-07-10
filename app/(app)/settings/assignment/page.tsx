@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { usePermissions } from "@/hooks/usePermissions";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
-import { getEffectiveRole } from "@/lib/roles";
+import { getEffectiveRole, roleLabel } from "@/lib/roles";
 import type { AssignmentSettings, TeamUser } from "@/lib/types";
 
 export default function AssignmentSettingsPage() {
@@ -46,9 +46,8 @@ export default function AssignmentSettingsPage() {
           throw new Error(assignmentData.error || "Erro ao carregar.");
         }
         setSettings(assignmentData.settings);
-        setMembers(
-          (teamData.users || []).filter((u) => getEffectiveRole(u) === "member")
-        );
+        // Toda a equipe pode atender — Líder e Supervisor também.
+        setMembers(teamData.users || []);
         setError("");
       })
       .catch((err) => {
@@ -260,7 +259,8 @@ export default function AssignmentSettingsPage() {
             <Card className="p-6">
               <h3 className="font-medium">Atendentes elegíveis</h3>
               <p className="mt-1 text-sm text-app-subtle">
-                Deixe vazio para incluir todas as atendentes.
+                Toda a equipe pode receber atendimentos (Atendente, Supervisor e Líder).
+                Deixe vazio para incluir todos.
               </p>
               <ul className="mt-4 space-y-2">
                 {members.length === 0 ? (
@@ -275,7 +275,7 @@ export default function AssignmentSettingsPage() {
                     return (
                     <li key={member.uid}>
                       <Checkbox
-                        label={member.name || member.email || member.uid}
+                        label={`${member.name || member.email || member.uid} — ${roleLabel(getEffectiveRole(member))}`}
                         checked={eligible.includes(member.uid)}
                         onChange={() => toggleEligible(member.uid)}
                         labelClassName="text-sm"

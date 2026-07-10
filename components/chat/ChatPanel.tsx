@@ -26,6 +26,7 @@ import type { Contact, ConversationListItem, Message } from "@/lib/types";
 import { appAlert, appConfirm } from "@/lib/app-dialog";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
 import { useChatScroll } from "@/hooks/useChatScroll";
+import { useConversationWindow } from "@/hooks/useConversationWindow";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { userChatSignatureName } from "@/lib/user-display";
@@ -87,6 +88,7 @@ export function ChatPanel({
   const windowOpen =
     !isMetaConnection ||
     isWithinConversationWindow(conversation?.lastInboundAt);
+  const windowCountdown = useConversationWindow(conversation?.lastInboundAt);
   const composerDisabled = isMetaConnection && !windowOpen;
   const isClosed = conversation?.status === "closed";
   const canAssignAnyone = can("team.view") && role !== "member";
@@ -645,8 +647,15 @@ export function ChatPanel({
             </Badge>
           )}
           {isMetaConnection && (
-            <Badge tone={windowOpen ? "success" : "warning"}>
-              {windowOpen ? "24h aberta" : "24h fechada"}
+            <Badge
+              tone={windowOpen ? "success" : "warning"}
+              title="Janela de 24h: tempo restante para responder livremente; depois só com template"
+            >
+              {windowOpen && windowCountdown.label
+                ? `Janela: ${windowCountdown.label}`
+                : windowOpen
+                  ? "24h aberta"
+                  : "24h fechada"}
             </Badge>
           )}
           {currentUid && onConversationUpdated && (

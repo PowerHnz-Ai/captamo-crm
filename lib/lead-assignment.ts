@@ -26,16 +26,18 @@ function mapTeamUserDoc(doc: DocumentSnapshot): TeamUser {
   };
 }
 
+/**
+ * Quem pode receber atendimento: TODA a equipe ativa (Atendente, Supervisor e
+ * Líder também atendem). A seleção fina fica em eligibleMemberUids (tela de
+ * Atribuição).
+ */
 export async function listAttendants(scope: CompanyScope): Promise<TeamUser[]> {
   const snap = await getDb()
     .collection("users")
     .where("companyId", "==", scope.companyId)
     .get();
 
-  return snap.docs
-    .map(mapTeamUserDoc)
-    .filter((u) => isUserActive(u))
-    .filter((u) => getEffectiveRole(u) === "member");
+  return snap.docs.map(mapTeamUserDoc).filter((u) => isUserActive(u));
 }
 
 export async function listTeamUsers(scope: CompanyScope): Promise<TeamUser[]> {

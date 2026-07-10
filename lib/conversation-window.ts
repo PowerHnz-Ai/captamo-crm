@@ -2,6 +2,8 @@ import type { ProviderType } from "./whatsapp/types";
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 
+export const CONVERSATION_WINDOW_MS = WINDOW_MS;
+
 type TimestampLike =
   | { toMillis?: () => number; toDate?: () => Date; seconds?: number; _seconds?: number }
   | string
@@ -35,6 +37,27 @@ export function isWithinConversationWindow(
   const lastMs = toMillis(lastInboundAt);
   if (lastMs == null) return false;
   return now - lastMs <= WINDOW_MS;
+}
+
+/** Tempo restante da janela em ms (0 quando fechada; null sem inbound). */
+export function conversationWindowRemainingMs(
+  lastInboundAt?: TimestampLike,
+  now = Date.now()
+): number | null {
+  const lastMs = toMillis(lastInboundAt);
+  if (lastMs == null) return null;
+  const remaining = lastMs + WINDOW_MS - now;
+  return remaining > 0 ? remaining : 0;
+}
+
+/** "23h 05min" | "42min" | "menos de 1min" — para o cronômetro da janela. */
+export function formatWindowRemaining(ms: number): string {
+  const totalMinutes = Math.floor(ms / 60_000);
+  if (totalMinutes < 1) return "menos de 1min";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}min`;
+  return `${hours}h ${String(minutes).padStart(2, "0")}min`;
 }
 
 export function conversationWindowMessage(): string {

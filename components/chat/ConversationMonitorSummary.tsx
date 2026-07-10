@@ -2,8 +2,9 @@
 
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { isWithinConversationWindow, toDate } from "@/lib/conversation-window";
+import { toDate } from "@/lib/conversation-window";
 import { formatFirstResponseTime } from "@/lib/first-response";
+import { useConversationWindow } from "@/hooks/useConversationWindow";
 import type { ConversationListItem } from "@/lib/types";
 
 /**
@@ -16,7 +17,7 @@ export function ConversationMonitorSummary({
 }: {
   conversation: ConversationListItem;
 }) {
-  const windowOpen = isWithinConversationWindow(conversation.lastInboundAt);
+  const window = useConversationWindow(conversation.lastInboundAt);
   const lastDate = toDate(conversation.lastMessageAt as Parameters<typeof toDate>[0]);
   const lastAt = lastDate
     ? formatDistanceToNow(lastDate, { addSuffix: true, locale: ptBR })
@@ -36,7 +37,7 @@ export function ConversationMonitorSummary({
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-app-muted">Janela 24h</dt>
-          <dd>{windowOpen ? "Aberta" : "Fechada"}</dd>
+          <dd>{window.open ? `Aberta — resta ${window.label}` : "Fechada"}</dd>
         </div>
         <div className="flex justify-between gap-4">
           <dt className="text-app-muted">Último evento</dt>

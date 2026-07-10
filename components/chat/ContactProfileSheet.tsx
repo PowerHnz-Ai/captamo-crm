@@ -19,6 +19,7 @@ import {
 } from "@/lib/conversation-window";
 import { apiFetch, parseApiJson } from "@/lib/api-fetch";
 import { appConfirm } from "@/lib/app-dialog";
+import { useConversationWindow } from "@/hooks/useConversationWindow";
 import { formatFirstResponseTime } from "@/lib/first-response";
 import type { Contact, ConversationListItem } from "@/lib/types";
 
@@ -57,6 +58,7 @@ export function ContactProfileSheet({
   const [error, setError] = useState("");
 
   const windowOpen = isWithinConversationWindow(conversation.lastInboundAt);
+  const windowCountdown = useConversationWindow(conversation.lastInboundAt);
   const isUnassigned = !conversation.assignedTo;
   const isMine = conversation.assignedTo === currentUid;
   const firstResponseLabel = formatFirstResponseTime(
@@ -236,8 +238,15 @@ export function ContactProfileSheet({
                   : "Sem autorização p/ campanhas"}
               </Badge>
               {contact?.blocked && <Badge tone="danger">Bloqueado</Badge>}
-              <Badge tone={windowOpen ? "success" : "warning"}>
-                {windowOpen ? "Janela 24h aberta" : "Janela 24h fechada"}
+              <Badge
+                tone={windowOpen ? "success" : "warning"}
+                title="Tempo restante para responder livremente; depois só com template"
+              >
+                {windowOpen && windowCountdown.label
+                  ? `Janela 24h: resta ${windowCountdown.label}`
+                  : windowOpen
+                    ? "Janela 24h aberta"
+                    : "Janela 24h fechada"}
               </Badge>
               {conversation.status === "closed" && (
                 <Badge tone="neutral">Atendimento encerrado</Badge>
